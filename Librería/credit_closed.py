@@ -3,6 +3,7 @@ import glob
 import pandas as pd
 import hashlib
 from collections import defaultdict
+from datetime import datetime
 
 
 def export_pickle(pickle_file, output_tc_al_corte):
@@ -36,11 +37,43 @@ def read_create_pickle(pickle_file, columns):
         print("📁 Archivo no localizado, creando nuevo archivo.")
     return df_tc_closed
 
-def process_closed_credit_accounts(folder_TC_al_corte, columns):
-    csv_files = glob.glob(os.path.join(folder_TC_al_corte, '*.csv'))
+def process_closed_credit_accounts(folder_TC_al_corte, columns, open_folder):
+
     pickle_file = os.path.join(folder_TC_al_corte, 'pickle_database.pkl')
     df_readed = read_create_pickle(pickle_file, columns)
-    
+    # 🔍 Archivos registrados anteriormente (limpios sin hash)
+    unique_files_raw = df_readed['file_name'].unique()
+    cleaned_files = sorted([x.split('__HASH__')[0] for x in unique_files_raw])
+    #print(f"cleaned_files: {cleaned_files}")
+    unique_files_raw = df_readed['file_name'].unique()
+    cleaned_files = [x.split('__HASH__')[0] for x in unique_files_raw]
+    # Archivos esperados por mes hasta el actual
+    now = datetime.now()
+    year = now.year
+    month = now.month
+    expected = [f"{year}-{m:02d}.csv" for m in range(month, 0, -1)]
+    missing = [f for f in expected if f not in cleaned_files]    
+
+    while True:
+        csv_files = glob.glob(os.path.join(folder_TC_al_corte, '*.csv'))        
+        # 📂 Archivos actualmente en la carpeta
+        current_files = sorted([os.path.basename(f) for f in csv_files])
+        #print(f"📂 Archivos actuales en carpeta: {current_files}")
+
+        # ❗ Condición corregida:
+        missing_still = [m for m in missing if m not in current_files]
+
+        if missing_still:
+            print("📁 No se detectaron todos los archivos esperados.")
+            print("📌 Archivos faltantes:")
+            for f in missing_still:
+                print(f"  - {f}")
+            
+            open_folder(folder_TC_al_corte)
+            input("🔄 Carga los archivos de corte pendientes y presiona ENTER cuando termines.\n")
+        else:
+            print("✅ Todos los archivos esperados están presentes. Continuando...")
+            break
     # Step 1: Build hash for all CSVs and detect internal duplicates
     hash_to_files = defaultdict(list)
     file_hashes = {}
@@ -49,6 +82,7 @@ def process_closed_credit_accounts(folder_TC_al_corte, columns):
         file_hash = hash_file_content(csv_file)
         file_hashes[csv_file] = file_hash
         hash_to_files[file_hash].append(csv_file)
+        open_folder
 
     # Highlight duplicates among CSV files (even with different names)
     for file_hash, files in hash_to_files.items():
@@ -60,7 +94,7 @@ def process_closed_credit_accounts(folder_TC_al_corte, columns):
 
     updated = False
     files_processed = 0
-
+    
     for csv_file in csv_files:
         file_hash = file_hashes[csv_file]
         if file_hash in existing_hashes:
@@ -84,8 +118,9 @@ def process_closed_credit_accounts(folder_TC_al_corte, columns):
             file_date = pd.to_datetime(df_csv_try['Fecha'].iloc[0], dayfirst=True)
         except Exception:
             file_date = pd.to_datetime(os.path.getmtime(csv_file), unit='s')
-        df_csv['Fecha'] = pd.to_datetime(df_csv['Fecha'], dayfirst=True, errors='coerce')
         df_csv = df_csv_try[columns].copy()
+        df_csv['Fecha'] = pd.to_datetime(df_csv['Fecha'], dayfirst=True, errors='coerce')
+        
         df_csv['file_date'] = file_date.strftime('%d/%m/%Y')
         df_csv['file_name'] = f"{os.path.basename(csv_file)}__HASH__{file_hash}"
 

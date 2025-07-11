@@ -13,7 +13,25 @@ import yaml
 from glob import glob 
 import pandas as pd
 from collections import defaultdict
+import subprocess
 
+
+def open_folder(os_path):
+    """Opens a folder in the appropriate file explorer depending on the OS."""
+    message_open = "A explorer windows was open, please move the files here"
+    print(message_print(message_open))
+    try:
+        if os.name == 'nt':  # Windows
+            os.startfile(os_path)
+        elif os.name == 'posix':  # macOS or Linux
+            if "darwin" in os.uname().sysname.lower():  # macOS
+                subprocess.run(["open", os_path])
+            else:  # Linux
+                subprocess.run(["xdg-open", os_path])
+        else:
+            print(f"Unsupported OS: {os.name}")
+    except Exception as e:
+        print(f"Error opening folder: {e}")
 
 def create_directory_if_not_exists(path_or_paths):
     """Creates a directory if it does not exist and prints in Jupyter."""
@@ -229,13 +247,67 @@ def processing_csv(download_folder, data_access):
         final_df.to_csv(csv_path, index=False)
         print(f"✅ Guardado: {csv_path}")
 
-def total_management(chrome_driver_load, folder_root, ACTIONS): 
+def credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit, check_only=True):
+    pickle_file = os.path.join(path_TC_closed, 'pickle_database.pkl')
+    
+    if check_only:
+        if not os.path.exists(pickle_file):
+            print(f"⚠️ No se encontró el archivo: {pickle_file}")
+            return
+        
+        df = pd.read_pickle(pickle_file)
+        #print('\n📂 Columnas del DataFrame:\n', df.columns, '\n')
+
+        unique_files_raw = df['file_name'].unique()
+
+        # Extraer solo la parte antes del __HASH__
+        cleaned_files = [x.split('__HASH__')[0] for x in unique_files_raw]
+
+        #print("🧾 Archivos únicos encontrados:")
+        #print(cleaned_files)
+
+        # Obtener año y mes actuales
+        now = datetime.now()
+        year = now.year
+        month = now.month
+
+        # Crear lista de nombres esperados
+        expected = [f"{year}-{m:02d}.csv" for m in range(month, 0, -1)]
+
+        #print("\n🔎 Esperando encontrar:")
+        #print(expected)
+
+        # Comparar
+        missing = [f for f in expected if f not in cleaned_files]
+
+        if missing:
+            print(message_print("⚠️ Cortes faltantes:"))
+            for f in missing:
+                print(f"  - {f}")
+        else:
+            print("\n✅ Todos los archivos mensuales esperados están presentes.")
+
+    else:
+        process_closed_credit_accounts(path_TC_closed, headers_credit, open_folder)
+        choice = input("¿Quieres exportar la información al corte a tu carpeta de descargas? (si/no): ").strip().lower()
+
+        if choice == "si":
+            output_tc_al_corte = os.path.expanduser("~/Downloads/TC_al_corte.xlsx")
+            export_pickle(pickle_file, output_tc_al_corte)
+            print(f"✅ Archivo exportado a: {output_tc_al_corte}")
+
+
+def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_credit_accounts, export_pickle): 
     working_folder= os.path.join(folder_root, "Implementación")
+    data_access = yaml_creation(working_folder)
     downloads = "Temporal Downloads"
     download_folder = os.path.join(working_folder, downloads)
+    path_TC_closed = os.path.join(working_folder, 'TC al corte')
     create_directory_if_not_exists([working_folder, download_folder])
     add_to_gitignore(folder_root, working_folder)
-    data_access = yaml_creation(working_folder)
+    headers_credit = data_access['BANORTE_credit_headers']
+    credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit)
+    
     ACTIONS["https://www.banorte.com/wps/portal/ixe/Home/inicio"][0]["value"] = data_access["BANORTE_user"]
     ACTIONS["https://www.banorte.com/wps/portal/ixe/Home/inicio"][2]["value"] = data_access["BANORTE_password"]
 
@@ -243,11 +315,10 @@ def total_management(chrome_driver_load, folder_root, ACTIONS):
 
 
     while True:
-        choice = input("""
-    ¿Qué deseas hacer?
+        choice = input(f"""{message_print('¿Qué deseas hacer?')}
     1. Descargar archivos CSV
     2. Procesar archivos CSV
-    3. Procesar ingresos
+    3. Cargar mes de corte
     Elige una opción (1, 2 o 3): """)
 
         if choice == "1":
@@ -260,7 +331,8 @@ def total_management(chrome_driver_load, folder_root, ACTIONS):
             processing_csv(download_folder, data_access)
             break
         elif choice == "3":
-            print("💰 Procesando ingresos...")
+            print("💰 Cargando el mes de corte")
+            credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit, check_only=False)
             # Aquí puedes llamar a la función correspondiente
             break
         else:
@@ -282,6 +354,7 @@ if __name__ == "__main__":
 
     # 2) Ahora importa la función directamente
     from chrome_driver_load import load_chrome
+    from credit_closed import process_closed_credit_accounts, export_pickle
 
     ACTIONS = {
     "https://www.banorte.com/wps/portal/ixe/Home/inicio": [
@@ -292,4 +365,4 @@ if __name__ == "__main__":
         {"type": "click",     "by": By.XPATH, "locator":'//*[@id="btnAceptarloginPasswordAsync"]'}
     ],} 
     # 3) Llama a tu función pasándola como parámetro
-    total_management(load_chrome, folder_root, ACTIONS)
+    total_management(load_chrome, folder_root, ACTIONS, process_closed_credit_accounts, export_pickle)
