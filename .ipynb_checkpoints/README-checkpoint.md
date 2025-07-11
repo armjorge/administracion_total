@@ -1,6 +1,6 @@
 # Administración total
 
-Alcanzar un objetivo a largo plazo es la consecuencia de tomar decisiones hoy que simplemente generen el patrón que proyectado en el tiempo alcanzará el objetivo. 
+Alcanzar un objetivo a largo plazo es la consecuencia de tomar decisiones hoy que generen el patrón que proyectado en el tiempo alcanzará el objetivo. 
 
 ## Objetivo y descripción del proyecto. 
 
@@ -25,5 +25,3 @@ Lo anterior es para generar la estructura a analizar.
 - Activamente hacer que el usuario llene el 100% de los conceptos en los dataframes fijos. 
 - Por mes: calcular gasto proveniente de débito. Gasto proveniente de crédito. Ingresos.
 - Cargar a google sheet del usuario para que tengan y generen sus filtros. 
-
-
