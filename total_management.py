@@ -10,10 +10,12 @@ from selenium.common.exceptions import TimeoutException
 import time
 from datetime import datetime
 import yaml
-from glob import glob 
+from glob import glob
 import pandas as pd
 from collections import defaultdict
 import subprocess
+import re
+
 
 
 def open_folder(os_path):
@@ -219,9 +221,9 @@ def processing_csv(download_folder, data_access):
         for each_file in file_list:
             try:
                 try:
-                    df = pd.read_csv(file, nrows=1, encoding='utf-8')
+                    df = pd.read_csv(each_file, encoding='utf-8')
                 except UnicodeDecodeError:
-                    df = pd.read_csv(file, nrows=1, encoding='latin1')  # fallback
+                    df = pd.read_csv(each_file, encoding='latin1')  # fallback
                 df_hash = pd.util.hash_pandas_object(df, index=True).sum()
 
                 if df_hash in loaded_hashes:
@@ -297,6 +299,277 @@ def credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, expor
             print(f"✅ Archivo exportado a: {output_tc_al_corte}")
 
 
+def credit_current_month(working_folder, check_only=True):
+    """
+    Para cada subcarpeta de `working_folder` con nombre 'YYYY-MM':
+      1) Lee todos los archivos '*_credit.csv' (nombres 'YYYY-MM-DD…_credit.csv').
+      2) Carga o crea '{YYYY-MM}_credit_summary.xlsx'.
+      3) Añade sólo los renglones nuevos (comparando todos los campos excepto 'filename').
+      4) Guarda el resumen actualizado.
+    """
+    folder_pattern = re.compile(r'^\d{4}-\d{2}$')
+    print(message_print('Iniciando el script de gastos después del corte'))
+    for folder_name in os.listdir(working_folder):
+        folder_path = os.path.join(working_folder, folder_name)
+        if not os.path.isdir(folder_path) or not folder_pattern.match(folder_name):
+            continue
+        #print('Folder de trabajo', os.path.basename(working_folder))
+        #print('Folder de trabajo', os.path.basename(folder_name))
+        # ——— Sección MFI ———
+        # 1) Agregar lista de archivos MFI dentro de la subcarpeta
+        mfi_pattern = os.path.join(folder_path, '*_MFI.csv')
+        MFI_files = sorted(glob(mfi_pattern))
+        
+        if MFI_files:
+            # 2) Quedarse solo con el más reciente (último en el sort lexicográfico YYYY-MM-DD_MFI.csv)
+            mfi_file = MFI_files[-1]
+            basename = os.path.basename(mfi_file)
+            file_date = datetime.strptime(basename.split('_')[0], '%Y-%m-%d')
+            # 3) Definir ruta de resumen dentro de la misma subcarpeta
+            MFI_summary_path = os.path.join(
+                folder_path,
+                f"{folder_name}_MFI.xlsx"
+            )
+
+            # 4) Leer todo el CSV
+            try:
+                df_brut_msi = pd.read_csv(
+                    mfi_file,
+                    encoding='utf-8-sig',
+                    sep=',',
+                    skipinitialspace=True  # drop spaces immediately after commas
+                )
+            except Exception:
+                df_brut_msi = pd.read_csv(mfi_file, encoding='utf-8')
+            print(repr(df_brut_msi.columns.tolist()))
+            # 5) Normalizar fecha y fijar al mes actual
+            #MFI_files_date = mfi_file has the format 2025-06-04_MFI.csv, we need to extract yyyy-mm-dd as date time 
+            df_brut_msi['Fecha de operación'] = pd.to_datetime(
+                df_brut_msi['Fecha de operación'],
+                format='%d/%m/%Y'
+            ).apply(lambda x: x.replace(month=file_date.month))
+
+            # 6) Función para duplicar filas con offset de meses
+            def duplicate_rows_with_incremented_months(df):
+                new_rows = []
+                for _, row in df.iterrows():
+                    pagos, suffix = row['Pagos pendientes'].split('/')
+                    count = int(pagos)
+                    for i in range(count):
+                        new_row = row.copy()
+                        new_row['Fecha de operación'] = (
+                            new_row['Fecha de operación']
+                            + pd.DateOffset(months=i+1)
+                        )
+                        new_row['Pagos pendientes'] = f"{count-i-1:02d}/{suffix}"
+                        new_rows.append(new_row)
+                duplicated = pd.DataFrame(new_rows, columns=df.columns)
+                return pd.concat([df, duplicated], ignore_index=True)\
+                         .sort_values(by='Fecha de operación')
+            print(df_brut_msi.head(10))
+            # 7) Generar DataFrame final e ignorar duplicados entre offsets
+            df_brut_msi = duplicate_rows_with_incremented_months(df_brut_msi)
+
+            # 8) Guardar el resumen a Excel
+            df_brut_msi.to_excel(MFI_summary_path, index=False)
+            print(f"✅ Guardado MFI summary: {MFI_summary_path}")
+        else:
+            df_brut_msi = pd.DataFrame()
+            print(f"⚠️ No se encontraron archivos *_MFI.csv en {folder_path}")
+            
+
+        # ——— Fin sección MFI ———
+        # """"
+        # """"        
+        # ——— Inicia sección Crédito después del corte ———        
+        print('\nInicia sección Crédito después del corte')
+        csv_files = sorted(glob(os.path.join(folder_path, '*_credit.csv')))
+        summary_path = os.path.join(working_folder, f"{folder_name}", f"{folder_name}_credit_summary.xlsx")
+
+        # Carga o crea df_summary
+        if os.path.exists(summary_path):
+            df_summary = pd.read_excel(summary_path)
+            df_summary['Fecha'] = pd.to_datetime(
+                df_summary['Fecha'],
+                dayfirst=True,               # 'dd/mm/YYYY'
+                format='%d/%m/%Y',
+                errors='coerce'              # bad parse → NaT
+            )            
+        else:
+            df_summary = pd.DataFrame()
+
+        for csv_file in csv_files:
+            base = os.path.basename(csv_file)
+            df_new = pd.read_csv(csv_file)
+            df_new['filename'] = base
+
+            # Columnas de datos (sin 'filename')
+            data_cols = [c for c in df_new.columns if c != 'filename']
+
+            if df_summary.empty:
+                # Primera lectura: todo entra
+                df_summary = df_new.copy()
+            else:
+                # Para cada renglón de df_new, sólo agregar si no existe ya en df_summary
+                for _, row in df_new.iterrows():
+                    iguales = (df_summary[data_cols] == row[data_cols]).all(axis=1)
+                    if not iguales.any():
+                        # concatena ese único renglón
+                        df_summary = pd.concat(
+                            [df_summary, pd.DataFrame([row])],
+                            ignore_index=True
+                        )
+        # Guardar el resumen actualizado
+        df_summary.to_excel(summary_path, index=False)
+
+        #print(df_summary.head(10))
+        if not df_brut_msi.empty:
+            print(message_print('Uniendo información de MSI con información después del corte'))
+
+            df_summary['Fecha'] = pd.to_datetime(
+                df_summary['Fecha'],
+                dayfirst=True,
+                errors='coerce'
+            )
+
+            for _, row in df_brut_msi.iterrows():
+                fecha_op = row['Fecha de operación'].date()   # datetime.date
+                concepto = row['Concepto']
+                cargo    = row['Mensualidad']
+
+                # now compare against the plain-date series
+                existe = (
+                    (df_summary['Fecha'] == fecha_op) &
+                    (df_summary['Concepto'] == concepto) &
+                    (df_summary['Cargo'] == cargo)
+                ).any()
+
+                if not existe:
+                    nueva = {
+                        'Fecha':    fecha_op,
+                        'Concepto': concepto,
+                        'Cargo':    cargo,
+                        'filename': basename
+                    }
+                    df_summary = pd.concat([df_summary, pd.DataFrame([nueva])], ignore_index=True)
+                # Guardar el resumen actualizado
+                df_summary.to_excel(summary_path, index=False)
+
+def upload_data(working_folder):
+    """
+    1) Carga pickle_database.pkl de 'TC al corte'
+    2) Detecta la carpeta más reciente YYYY-MM dentro de working_folder
+    3) Busca y carga:
+       - {YYYY-MM}_MFI.xlsx  → df_mfi
+       - *_credit.csv         → df_post_corte (el más reciente)
+       - *_debit.csv          → df_debito     (el más reciente)
+    4) Devuelve cuatro DataFrames: al_corte, mfi, post_corte y debito.
+    """
+    # 1) Data al corte
+    pickle_file = os.path.join(working_folder, 'TC al corte', 'pickle_database.pkl')
+    df_al_corte = pd.read_pickle(pickle_file)
+
+    # 2) Folder más reciente YYYY-MM
+    candidates = [
+        d for d in os.listdir(working_folder)
+        if os.path.isdir(os.path.join(working_folder, d)) and re.match(r'^\d{4}-\d{2}$', d)
+    ]
+    if not candidates:
+        raise FileNotFoundError(f"No se encontraron carpetas YYYY-MM en {working_folder}")
+    newest_folder = sorted(candidates)[-1]
+    newest_folder_path = os.path.join(working_folder, newest_folder)
+
+    # 3a) MFI (.xlsx)
+    mfi_pattern = os.path.join(newest_folder_path, f"{newest_folder}_MFI.xlsx")
+    mfi_files = glob(mfi_pattern)
+    newest_mfi = mfi_files[0] if mfi_files else None
+
+    # 3b) Crédito posterior al corte (último *_credit.csv)
+    credit_pattern = os.path.join(newest_folder_path, "*_credit.csv")
+    credit_files = sorted(glob(credit_pattern))
+    newest_post_corte = credit_files[-1] if credit_files else None
+
+    # 3c) Débito (último *_debit.csv)
+    debit_pattern = os.path.join(newest_folder_path, "*_debit.csv")
+    debit_files = sorted(glob(debit_pattern))
+    newest_debit = debit_files[-1] if debit_files else None
+
+    # 4) Cargar cada uno (o dataframe vacío)
+    if newest_mfi:
+        df_mfi = pd.read_excel(newest_mfi)
+    else:
+        print(f"⚠️ No se encontró {newest_folder}_MFI.xlsx en {newest_folder_path}")
+        df_mfi = pd.DataFrame()
+
+    if newest_post_corte:
+        df_post_corte = pd.read_csv(newest_post_corte)
+    else:
+        print(f"⚠️ No se encontró ningún *_credit.csv en {newest_folder_path}")
+        df_post_corte = pd.DataFrame()
+
+    if newest_debit:
+        df_debito = pd.read_csv(newest_debit)
+    else:
+        print(f"⚠️ No se encontró ningún *_debit.csv en {newest_folder_path}")
+        df_debito = pd.DataFrame()
+
+    """
+        # Archivo con corte, posterior al corte y MFI
+
+
+        csv_files = sorted(glob(os.path.join(folder_path, '*_credit.csv')))                        
+        newer_credit_file = csv_files[-1]
+        basename_credit = os.path.basename(newer_credit_file)
+
+        # 2) Cargar y normalizar fecha
+        df_post_cut = pd.read_csv(newer_credit_file)
+        df_post_cut['Fecha'] = pd.to_datetime(
+            df_post_cut['Fecha'],
+            dayfirst=True,
+            errors='coerce'
+        )
+
+        # 3) Si hay datos MFI, hacemos el merge
+        if df_brut_msi is not None and not df_brut_msi.empty:
+            # Preparamos series para comparación
+            fecha_series = df_post_cut['Fecha'].dt.date
+            concepto_series = df_post_cut['Concepto']
+            cargo_series    = df_post_cut['Cargo']
+
+            basename_mfi = os.path.basename(mfi_file)
+
+            for _, row in df_brut_msi.iterrows():
+                fecha_op = row['Fecha de operación'].date()
+                concepto = row['Concepto']
+                cargo    = row['Mensualidad']
+
+                existe = (
+                    (fecha_series == fecha_op) &
+                    (concepto_series == concepto) &
+                    (cargo_series    == cargo)
+                ).any()
+
+                if not existe:
+                    nueva = {
+                        'Fecha':    fecha_op,
+                        'Concepto': concepto,
+                        'Cargo':    cargo,
+                        'filename': basename_mfi
+                    }
+                    df_post_cut = pd.concat(
+                        [df_post_cut, pd.DataFrame([nueva])],
+                        ignore_index=True
+                    )
+
+            print(f"Se generó un dataframe uniendo {basename_credit} y {basename_mfi}")
+        else:
+            print(f"Se toma el archivo posterior al corte más reciente ({basename_credit}) como único para cargar")
+
+        return df_post_cut        
+    """                
+
+
+
 def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_credit_accounts, export_pickle): 
     working_folder= os.path.join(folder_root, "Implementación")
     data_access = yaml_creation(working_folder)
@@ -319,6 +592,8 @@ def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_cr
     1. Descargar archivos CSV
     2. Procesar archivos CSV
     3. Cargar mes de corte
+    4. Cargar gastos posterior al corte
+    5. Actualizar el google sheet
     Elige una opción (1, 2 o 3): """)
 
         if choice == "1":
@@ -331,9 +606,17 @@ def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_cr
             processing_csv(download_folder, data_access)
             break
         elif choice == "3":
-            print("💰 Cargando el mes de corte")
+            print("💰 Cargando corte de crédito cerrado")
             credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit, check_only=False)
             # Aquí puedes llamar a la función correspondiente
+            break
+        elif choice == "4":
+            print("💰 Cargando gastos posterior al corte")
+            df_post_cut = credit_current_month(working_folder, check_only=True)
+            break
+        elif choice == "5":
+            print("💰 Cargando gastos posterior al corte")
+            upload_data(working_folder)
             break
         else:
             print("⚠️ Opción no válida. Por favor elige 1, 2 o 3.\n")
