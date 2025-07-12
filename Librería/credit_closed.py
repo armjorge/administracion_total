@@ -37,7 +37,7 @@ def read_create_pickle(pickle_file, columns):
         print("📁 Archivo no localizado, creando nuevo archivo.")
     return df_tc_closed
 
-def process_closed_credit_accounts(folder_TC_al_corte, columns, open_folder):
+def process_closed_credit_accounts(folder_TC_al_corte, columns, open_folder, debit):
 
     pickle_file = os.path.join(folder_TC_al_corte, 'pickle_database.pkl')
     df_readed = read_create_pickle(pickle_file, columns)
@@ -54,6 +54,8 @@ def process_closed_credit_accounts(folder_TC_al_corte, columns, open_folder):
     expected = [f"{year}-{m:02d}.csv" for m in range(month, 0, -1)]
     missing = [f for f in expected if f not in cleaned_files]    
 
+
+        
     while True:
         csv_files = glob.glob(os.path.join(folder_TC_al_corte, '*.csv'))        
         # 📂 Archivos actualmente en la carpeta
@@ -70,7 +72,43 @@ def process_closed_credit_accounts(folder_TC_al_corte, columns, open_folder):
                 print(f"  - {f}")
             
             open_folder(folder_TC_al_corte)
+            
             input("🔄 Carga los archivos de corte pendientes y presiona ENTER cuando termines.\n")
+            
+            if debit:
+                # 1) Find all CSVs
+                csv_pattern = os.path.join(folder_TC_al_corte, '*.csv')
+                all_csvs = sorted(glob.glob(csv_pattern))
+
+                # 2) Extract unique YYYY-MM prefixes
+                prefixes = set()
+                for fpath in all_csvs:
+                    fname = os.path.basename(fpath)
+                    if len(fname) >= 7 and fname[4] == '-' and fname[:4].isdigit() and fname[5:7].isdigit():
+                        prefixes.add(fname[:7])
+
+                # 3) For each month‐prefix, merge & clean up
+                for prefix in sorted(prefixes):
+                    group_pattern = os.path.join(folder_TC_al_corte, f'{prefix}*.csv')
+                    group_files = sorted(glob.glob(group_pattern))
+                    if not group_files:
+                        continue
+
+                    dfs = []
+                    for f in group_files:
+                        df = pd.read_csv(f)
+                        missing = set(columns) - set(df.columns)
+                        if missing:
+                            raise ValueError(f"{os.path.basename(f)} missing columns: {missing}")
+                        dfs.append(df)
+
+                    merged = pd.concat(dfs, ignore_index=True)
+                    out_file = os.path.join(folder_TC_al_corte, f'{prefix}.csv')
+                    merged.to_csv(out_file, index=False)
+
+                    for f in group_files:
+                        if os.path.basename(f) != f'{prefix}.csv':
+                            os.remove(f)            
         else:
             print("✅ Todos los archivos esperados están presentes. Continuando...")
             break

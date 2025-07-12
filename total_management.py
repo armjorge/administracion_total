@@ -7,7 +7,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import TimeoutException
-import time
 from datetime import datetime
 import yaml
 from glob import glob
@@ -15,6 +14,9 @@ import pandas as pd
 from collections import defaultdict
 import subprocess
 import re
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from gspread_dataframe import set_with_dataframe
 
 
 
@@ -249,7 +251,7 @@ def processing_csv(download_folder, data_access):
         final_df.to_csv(csv_path, index=False)
         print(f"✅ Guardado: {csv_path}")
 
-def credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit, check_only=True):
+def credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit, check_only=True, debit = False):
     pickle_file = os.path.join(path_TC_closed, 'pickle_database.pkl')
     
     if check_only:
@@ -290,11 +292,15 @@ def credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, expor
             print("\n✅ Todos los archivos mensuales esperados están presentes.")
 
     else:
-        process_closed_credit_accounts(path_TC_closed, headers_credit, open_folder)
+        process_closed_credit_accounts(path_TC_closed, headers_credit, open_folder, debit)
         choice = input("¿Quieres exportar la información al corte a tu carpeta de descargas? (si/no): ").strip().lower()
 
         if choice == "si":
-            output_tc_al_corte = os.path.expanduser("~/Downloads/TC_al_corte.xlsx")
+            if debit: 
+                filename= 'Debito_al_corte'
+            else: 
+                filename = 'TC_al_corte'
+            output_tc_al_corte = os.path.expanduser(f"~/Downloads/{filename}.xlsx")
             export_pickle(pickle_file, output_tc_al_corte)
             print(f"✅ Archivo exportado a: {output_tc_al_corte}")
 
@@ -455,7 +461,7 @@ def credit_current_month(working_folder, check_only=True):
                 # Guardar el resumen actualizado
                 df_summary.to_excel(summary_path, index=False)
 
-def upload_data(working_folder):
+def upload_data(working_folder, data_access):
     """
     1) Carga pickle_database.pkl de 'TC al corte'
     2) Detecta la carpeta más reciente YYYY-MM dentro de working_folder
@@ -468,7 +474,12 @@ def upload_data(working_folder):
     # 1) Data al corte
     pickle_file = os.path.join(working_folder, 'TC al corte', 'pickle_database.pkl')
     df_al_corte = pd.read_pickle(pickle_file)
+    df_al_corte['file_name'] = df_al_corte['file_name'].str.replace(r'__HASH__.*$', '', regex=True)
+    debit_pickle = os.path.join(working_folder, 'Débito al mes', 'pickle_database.pkl')
+    df_debito_corte = pd.read_pickle(debit_pickle)
+    df_debito_corte['file_name'] = df_debito_corte['file_name'].str.replace(r'__HASH__.*$', '', regex=True)
 
+    print(f"Archivos al corte cargados: {os.path.basename(pickle_file)}")
     # 2) Folder más reciente YYYY-MM
     candidates = [
         d for d in os.listdir(working_folder)
@@ -494,79 +505,136 @@ def upload_data(working_folder):
     debit_files = sorted(glob(debit_pattern))
     newest_debit = debit_files[-1] if debit_files else None
 
-    # 4) Cargar cada uno (o dataframe vacío)
+    # 3d) Cargar cada uno (o dataframe vacío)
     if newest_mfi:
         df_mfi = pd.read_excel(newest_mfi)
+        print(f"Archivo MSI cargado: {os.path.basename(newest_mfi)}")
     else:
-        print(f"⚠️ No se encontró {newest_folder}_MFI.xlsx en {newest_folder_path}")
+        print(f"⚠️ No se encontró {newest_folder}_MFI.xlsx en {os.path.basename(newest_folder_path)}")
         df_mfi = pd.DataFrame()
 
     if newest_post_corte:
         df_post_corte = pd.read_csv(newest_post_corte)
+        df_post_corte['file_name'] = os.path.basename(newest_post_corte)
+        print(f"Archivo post corte: {os.path.basename(newest_post_corte)}")
     else:
         print(f"⚠️ No se encontró ningún *_credit.csv en {newest_folder_path}")
         df_post_corte = pd.DataFrame()
 
     if newest_debit:
         df_debito = pd.read_csv(newest_debit)
+        df_debito['file_name'] = os.path.basename(newest_debit)
+
+        print(f"Archivo débito: {os.path.basename(newest_debit)}")
     else:
         print(f"⚠️ No se encontró ningún *_debit.csv en {newest_folder_path}")
         df_debito = pd.DataFrame()
 
-    """
-        # Archivo con corte, posterior al corte y MFI
-
-
-        csv_files = sorted(glob(os.path.join(folder_path, '*_credit.csv')))                        
-        newer_credit_file = csv_files[-1]
-        basename_credit = os.path.basename(newer_credit_file)
-
-        # 2) Cargar y normalizar fecha
-        df_post_cut = pd.read_csv(newer_credit_file)
-        df_post_cut['Fecha'] = pd.to_datetime(
-            df_post_cut['Fecha'],
-            dayfirst=True,
+    # Cambiando fechas. 
+    # 1 Débito al corte             
+    if not df_debito_corte.empty:
+        df_debito_corte['Fecha'] = (
+            pd.to_datetime(df_debito_corte['Fecha'], dayfirst=True, errors='coerce')
+            .dt.date
+        )
+        print('df_debito_corte: ', df_debito_corte['Fecha'].head(10))
+    # 2) Crédito después del corte post corte
+    if not df_post_corte.empty: 
+        df_post_corte['Fecha'] = (
+            pd.to_datetime(df_post_corte['Fecha'], dayfirst=True, errors='coerce')
+            .dt.date
+        )
+        print('df_post_corte: ', df_post_corte['Fecha'].head(10))
+    # 3 Crédito cortes cerrados
+    if not df_al_corte.empty:
+        df_al_corte['Fecha'] = pd.to_datetime(
+            df_al_corte['Fecha'],
+            format='%Y-%m-%d',
             errors='coerce'
+        ).dt.date   # ← yields pure datetime.date objects
+        print('df_al_corte: ', df_al_corte['Fecha'].head(10))
+    # 4 Débito abierto
+    if not df_debito.empty:
+        df_debito['Fecha'] = (
+            pd.to_datetime(df_debito['Fecha'], dayfirst=True, errors='coerce')
+            .dt.date
+        )        
+        print('df_debito: ', df_debito['Fecha'].head(10))
+    # --- 5) Merge de MFI en post_corte si aplica ---
+    basename_credit = os.path.basename(newest_post_corte) if newest_post_corte else 'N/A'
+    if not df_mfi.empty and not df_post_corte.empty:
+        fecha_series    = df_post_corte['Fecha'].dt.date
+        concepto_series = df_post_corte['Concepto']
+        cargo_series    = df_post_corte['Cargo']
+        basename_mfi    = os.path.basename(newest_mfi)
+
+        for _, row in df_mfi.iterrows():
+            fecha_op = row['Fecha de operación'].date()
+            concepto = row['Concepto']
+            cargo    = row['Mensualidad']
+
+            existe = (
+                (fecha_series == fecha_op) &
+                (concepto_series == concepto) &
+                (cargo_series    == cargo)
+            ).any()
+
+            if not existe:
+                nueva = {
+                    'Fecha':    fecha_op,
+                    'Concepto': concepto,
+                    'Cargo':    cargo,
+                    'filename': basename_mfi
+                }
+                df_post_corte = pd.concat(
+                    [df_post_corte, pd.DataFrame([nueva])],
+                    ignore_index=True
+                )
+
+        print(f"Se generó un DataFrame uniendo {basename_credit} y {basename_mfi}")
+    else:
+        print(f"Se generó un DataFrame solamente con ({basename_credit}) por no encontrar información MSI")
+
+    ## CARGAR EN GOOGLE SHEET
+
+    # Define the scope
+    scope = ['https://spreadsheets.google.com/feeds',
+            'https://www.googleapis.com/auth/drive']
+    # Add your service account file
+    json_path = os.path.join(working_folder, 'armjorgeSheets.json')
+    creds = ServiceAccountCredentials.from_json_keyfile_name(json_path, scope)  # Ensure the correct path
+    # Authorize the client sheet
+    client = gspread.authorize(creds)
+    url = data_access['url_google_sheet']
+    spreadsheet = client.open_by_url(url)
+
+
+    def update_google_sheet(sheet_name, df):
+        ws = spreadsheet.worksheet(sheet_name)
+        ws.clear()
+
+        # 1) If you want literal strings "11/14/2024" in M/D/YYYY...
+        if 'Fecha' in df.columns:
+            df['Fecha'] = (
+                pd.to_datetime(df['Fecha'], errors='coerce')
+                .dt.strftime('%m/%d/%Y')      # → "11/14/2024"
+            )
+
+        values = [df.columns.tolist()] + df.values.tolist()
+
+        # 3) Use RAW so Sheets never re-parse them as ISO
+        spreadsheet.values_update(
+            f"{sheet_name}!A1",
+            params={'valueInputOption': 'RAW'},
+            body={'values': values}
         )
 
-        # 3) Si hay datos MFI, hacemos el merge
-        if df_brut_msi is not None and not df_brut_msi.empty:
-            # Preparamos series para comparación
-            fecha_series = df_post_cut['Fecha'].dt.date
-            concepto_series = df_post_cut['Concepto']
-            cargo_series    = df_post_cut['Cargo']
-
-            basename_mfi = os.path.basename(mfi_file)
-
-            for _, row in df_brut_msi.iterrows():
-                fecha_op = row['Fecha de operación'].date()
-                concepto = row['Concepto']
-                cargo    = row['Mensualidad']
-
-                existe = (
-                    (fecha_series == fecha_op) &
-                    (concepto_series == concepto) &
-                    (cargo_series    == cargo)
-                ).any()
-
-                if not existe:
-                    nueva = {
-                        'Fecha':    fecha_op,
-                        'Concepto': concepto,
-                        'Cargo':    cargo,
-                        'filename': basename_mfi
-                    }
-                    df_post_cut = pd.concat(
-                        [df_post_cut, pd.DataFrame([nueva])],
-                        ignore_index=True
-                    )
-
-            print(f"Se generó un dataframe uniendo {basename_credit} y {basename_mfi}")
-        else:
-            print(f"Se toma el archivo posterior al corte más reciente ({basename_credit}) como único para cargar")
-
-        return df_post_cut        
-    """                
+    # Update the sheets with dataframes from df_informacion_actualizada
+    update_google_sheet('Credit_closed', df_al_corte)
+    update_google_sheet('Credit_current', df_post_corte)
+    update_google_sheet('Debit_closed', df_debito_corte)    
+    update_google_sheet('Debit_current', df_debito)    
+    
 
 
 
@@ -576,9 +644,11 @@ def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_cr
     downloads = "Temporal Downloads"
     download_folder = os.path.join(working_folder, downloads)
     path_TC_closed = os.path.join(working_folder, 'TC al corte')
-    create_directory_if_not_exists([working_folder, download_folder])
+    path_DEBIT_closed = os.path.join(working_folder, 'Débito al mes')
+    create_directory_if_not_exists([working_folder, download_folder, path_DEBIT_closed])
     add_to_gitignore(folder_root, working_folder)
     headers_credit = data_access['BANORTE_credit_headers']
+    headers_debit  = data_access['BANORTE_debit_headers']
     credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit)
     
     ACTIONS["https://www.banorte.com/wps/portal/ixe/Home/inicio"][0]["value"] = data_access["BANORTE_user"]
@@ -594,42 +664,39 @@ def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_cr
     3. Cargar mes de corte
     4. Cargar gastos posterior al corte
     5. Actualizar el google sheet
+    0. Salir
     Elige una opción (1, 2 o 3): """)
 
         if choice == "1":
             driver = chrome_driver_load(download_folder)
             timeout = 20
-            site_operation(ACTIONS, driver, timeout)
-            break
+            site_operation(ACTIONS, driver, timeout)            
         elif choice == "2":
             print("📦 Procesando archivos CSV...")
             processing_csv(download_folder, data_access)
-            break
         elif choice == "3":
             print("💰 Cargando corte de crédito cerrado")
-            credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit, check_only=False)
+            credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit, check_only=False, debit = False)
+            print("💰 Cargando corte de débito al mes")
+            credit_closed_by_month(path_DEBIT_closed, process_closed_credit_accounts, export_pickle, headers_debit, check_only=False, debit = True)
             # Aquí puedes llamar a la función correspondiente
-            break
+            
         elif choice == "4":
             print("💰 Cargando gastos posterior al corte")
-            df_post_cut = credit_current_month(working_folder, check_only=True)
-            break
+            credit_current_month(working_folder, check_only=True)
+        
         elif choice == "5":
             print("💰 Cargando gastos posterior al corte")
-            upload_data(working_folder)
-            break
+            upload_data(working_folder, data_access)
+        elif choice == "0":
+            print("👋 ¡Hasta luego!")
+            break            
         else:
-            print("⚠️ Opción no válida. Por favor elige 1, 2 o 3.\n")
+            print("⚠️ Opción no válida. Por favor elige 1, 2, 3, 4 o 5 .\n")
 
 
 if __name__ == "__main__":
-    print(message_print('Iniciando el script de administración total'))
-    if sys.platform == "darwin":
-        folder_root = r"/Users/armjorge/Library/CloudStorage/GoogleDrive-armjorge@gmail.com/My Drive/Projects/administracion_total"
-    elif sys.platform.startswith("win"):
-        folder_root = r"C:\Users\arman\Documents\habit_starter"
-    else:
-        raise RuntimeError(f"Unsupported platform: {sys.platform}")
+    folder_root = os.getcwd()
     # 1) Añade al path la carpeta donde está df_multi_match.py
     libs_dir = os.path.join(folder_root, "Librería")
     print(libs_dir)
