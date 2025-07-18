@@ -113,7 +113,7 @@ def add_to_gitignore(root_directory, path_to_add):
     else:
         print(f"'{relative_output}' ya está listado en .gitignore.")
 
-def site_operation(ACTIONS, driver, timeout):
+def site_operation(ACTIONS, driver, timeout,download_folder, data_access):
     for url, steps in ACTIONS.items():
         print(f"\n🔗 Navegando a {message_print(url)}")
         driver.get(url)
@@ -155,12 +155,11 @@ def site_operation(ACTIONS, driver, timeout):
         except TimeoutException as e:
             print(f"    ✗ Timeout en paso {idx} ({typ} @ {loc}): {e}")           
     input(message_print("Presina enter para cerrar el navegador"))
-    driver.quit()    
-
-
-def processing_csv(download_folder, data_access):
-    print(message_print("Iniciando la función para procesar CSVs"))
-
+    driver.quit()
+    ## 
+    ##
+    print(message_print("Renombrando y fusionando los archivos descargados para mover a su carpeta"))    
+    ##
     working_folder = os.path.abspath(os.path.join(download_folder, '..'))
 
     headers_credit = data_access['BANORTE_credit_headers']
@@ -207,7 +206,7 @@ def processing_csv(download_folder, data_access):
     print("\n📁 Archivos categorizados:")
     for f, info in dict_files.items():
         print(f"  - {os.path.basename(f)} → {info['type']} ({info['day']:02d}/{info['month']:02d}/{info['year']})")
-    print(dict_files)
+    #print(dict_files)
     print(message_print("Procesando y agrupando archivos por fecha y tipo"))
 
     grouped_files = defaultdict(list)
@@ -217,9 +216,9 @@ def processing_csv(download_folder, data_access):
         grouped_files[key].append(file_path)
 
     for (year, month, day, typ), file_list in grouped_files.items():
+        print("Vamos a fusionar archivos del mismo mes, día y tipo (Debit, Credit, MFI) diferente cuenta")
         dataframes = []
         loaded_hashes = set()
-
         for each_file in file_list:
             try:
                 try:
@@ -229,7 +228,7 @@ def processing_csv(download_folder, data_access):
                 df_hash = pd.util.hash_pandas_object(df, index=True).sum()
 
                 if df_hash in loaded_hashes:
-                    print(f"⚠️ Archivo duplicado: {os.path.basename(each_file)} — será ignorado.")
+                    print(f"⚠️ Archivo duplicado: {typ} {os.path.basename(each_file)} — será ignorado en la fusión.")
                     continue
 
                 loaded_hashes.add(df_hash)
@@ -239,17 +238,163 @@ def processing_csv(download_folder, data_access):
                 print(f"❌ Error al procesar '{os.path.basename(each_file)}': {e}")
 
         if not dataframes:
-            print(f"⚠️ No se cargaron archivos válidos para {year}-{month}-{day} ({typ})")
+            print(f"⚠️ No se cargaron archivos válidos para {year}-{month}-{day} (Tipo: {typ})")
             continue
 
         final_df = pd.concat(dataframes, ignore_index=True)
 
         csv_folder = os.path.join(working_folder, f"{year}-{month:02d}")
-        create_directory_if_not_exists(csv_folder)
+        not os.path.exists(csv_folder) and create_directory_if_not_exists(csv_folder)
 
         csv_path = os.path.join(csv_folder, f"{year}-{month:02d}-{day:02d}_{typ}.csv")
         final_df.to_csv(csv_path, index=False)
-        print(f"✅ Guardado: {csv_path}")
+        print(f"✅ Archivo movido: {os.path.basename(csv_path)}")    
+    for f, info in dict_files.items():
+        print(f"🗑️ Eliminando {os.path.basename(f)} debido a que ya se procesó")
+        os.remove(f)
+    print(message_print("Fin de la descarga y movimiento de archivos a sus carpetas, continúa procesando los CSV en cada carpeta (Opción 2)"))    
+
+def processing_csv(working_folder, data_access):
+    now = datetime.now()
+    yyyy = str(now.year)
+    mm = f"{now.month:02}"    
+    while True:
+        processing_choice = input("¿Quieres procesar 1) La carpeta del mes 2) Todas las carpetas? (Escribe 1 o 2): ")
+
+        if processing_choice == "1":
+            path = os.path.abspath(os.path.join(working_folder, f"{yyyy}-{mm}"))
+            working_folder = [path]
+            break
+
+        elif processing_choice == "2":
+            # List only folders matching pattern ####-##
+            all_entries = os.listdir(working_folder)
+            folders = [
+                os.path.join(working_folder, d)
+                for d in all_entries
+                if os.path.isdir(os.path.join(working_folder, d)) and re.match(r"^\d{4}-\d{2}$", d)
+            ]
+            working_folder = folders
+            break
+
+        else:
+            print("⚠️ Entrada no válida. Por favor escribe '1' o '2'.")
+
+    print(message_print('Impresión del working_folder'), working_folder)
+    print(message_print("Iniciando la función para procesar CSVs"))
+
+    headers_credit = data_access['BANORTE_credit_headers']
+    headers_debit  = data_access['BANORTE_debit_headers']
+    headers_MFI    = data_access['BANORTE_month_free_headers']
+    for folder in working_folder:
+        dict_files = {}
+
+        csv_files = glob(os.path.join(folder, "*.csv"))
+        for file in csv_files:
+            file_info = {}
+
+            # 🔍 Fecha tomada desde el nombre del archivo
+            filename = os.path.basename(file)
+            match = re.match(r"(\d{4}-\d{2}-\d{2})_", filename)
+
+            if match:
+                timestamp_str = match.group(1)  # e.g., '2025-07-11'
+                dt = datetime.strptime(timestamp_str, "%Y-%m-%d")
+            else:
+                print(f"⚠️ No se pudo extraer la fecha del archivo: {filename}")
+                continue  # Salta este archivo si no tiene fecha válida
+
+            file_info['year'] = dt.year
+            file_info['month'] = dt.month
+            file_info['day'] = dt.day
+            #timestamp = os.path.getmtime(file)  # getctime para creación, getmtime para modificación
+            #dt = datetime.fromtimestamp(timestamp)
+            file_info['year'] = dt.year
+            file_info['month'] = dt.month
+            file_info['day'] = dt.day
+
+            try:
+                try:
+                    df = pd.read_csv(file, nrows=1, encoding='utf-8')
+                except UnicodeDecodeError:
+                    df = pd.read_csv(file, nrows=1, encoding='latin1')  # fallback
+                
+                file_headers = list(df.columns)
+
+                if file_headers == headers_credit:
+                    file_info['type'] = 'credit'
+                elif file_headers == headers_debit:
+                    file_info['type'] = 'debit'
+                elif file_headers == headers_MFI:
+                    file_info['type'] = 'MFI'
+                else:
+                    print(f"⚠️ Archivo '{os.path.basename(file)}' no coincide con ninguna categoría.")
+                    continue  # saltar este archivo si no coincide
+            except Exception as e:
+                print(f"❌ Error al leer '{os.path.basename(file)}': {e}")
+                continue
+
+            dict_files[file] = file_info  # ✅ Guardar todo en el diccionario principal
+
+        print("\n📁 Archivos categorizados:")
+        print(dict_files)
+        for f, info in dict_files.items():
+            print(f"  - {os.path.basename(f)} → {info['type']} ({info['day']:02d}/{info['month']:02d}/{info['year']})")
+        #print(dict_files)
+        print(message_print("Procesando y agrupando archivos por fecha y tipo"))
+        # Agrupar archivos por tipo
+        credit_files = {k: v for k, v in dict_files.items() if v['type'] == 'credit'}
+        debit_files  = {k: v for k, v in dict_files.items() if v['type'] == 'debit'}
+        mfi_files    = {k: v for k, v in dict_files.items() if v['type'] == 'MFI'}
+
+        # Ordenar cada grupo por día (más reciente primero)
+        credit_files = dict(sorted(credit_files.items(), key=lambda x: x[1]['day'], reverse=True))
+        debit_files  = dict(sorted(debit_files.items(),  key=lambda x: x[1]['day'], reverse=True))
+        mfi_files    = dict(sorted(mfi_files.items(),    key=lambda x: x[1]['day'], reverse=True))
+        print(message_print("Finalizó la agrupación por tipo y por día"))
+        print(credit_files, debit_files, mfi_files)
+        grouped_files = defaultdict(list)
+
+        for file_path, info in dict_files.items():
+            key = (info['year'], info['month'], info['day'], info['type'])
+            grouped_files[key].append(file_path)
+
+        for (year, month, day, typ), file_list in grouped_files.items():
+            dataframes = []
+            loaded_hashes = set()
+
+            for each_file in file_list:
+                try:
+                    try:
+                        df = pd.read_csv(each_file, encoding='utf-8')
+                    except UnicodeDecodeError:
+                        df = pd.read_csv(each_file, encoding='latin1')  # fallback
+                    df_hash = pd.util.hash_pandas_object(df, index=True).sum()
+
+                    if df_hash in loaded_hashes:
+                        print(f"⚠️ Archivo duplicado: {os.path.basename(each_file)} — será ignorado.")
+                        continue
+
+                    loaded_hashes.add(df_hash)
+                    dataframes.append(df)
+
+                except Exception as e:
+                    print(f"❌ Error al procesar '{os.path.basename(each_file)}': {e}")
+
+            if not dataframes:
+                print(f"⚠️ No se cargaron archivos válidos para {year}-{month}-{day} ({typ})")
+                continue
+
+            final_df = pd.concat(dataframes, ignore_index=True)
+
+            csv_folder = os.path.join(working_folder, f"{year}-{month:02d}")
+            create_directory_if_not_exists(csv_folder)
+
+            csv_path = os.path.join(csv_folder, f"{year}-{month:02d}-{day:02d}_{typ}.csv")
+            final_df.to_csv(csv_path, index=False)
+            print(f"✅ Guardado: {os.path.basename(csv_path)}")
+
+
 
 def credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit, check_only=True, debit = False):
     pickle_file = os.path.join(path_TC_closed, 'pickle_database.pkl')
@@ -659,7 +804,7 @@ def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_cr
 
     while True:
         choice = input(f"""{message_print('¿Qué deseas hacer?')}
-    1. Descargar archivos CSV
+    1. Descargar, renombrar y mover archivos CSV corrientes (no cortes, no cerrados)
     2. Procesar archivos CSV
     3. Cargar mes de corte
     4. Cargar gastos posterior al corte
@@ -670,10 +815,10 @@ def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_cr
         if choice == "1":
             driver = chrome_driver_load(download_folder)
             timeout = 20
-            site_operation(ACTIONS, driver, timeout)            
+            site_operation(ACTIONS, driver, timeout, download_folder, data_access)            
         elif choice == "2":
             print("📦 Procesando archivos CSV...")
-            processing_csv(download_folder, data_access)
+            processing_csv(working_folder, data_access)
         elif choice == "3":
             print("💰 Cargando corte de crédito cerrado")
             credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit, check_only=False, debit = False)
