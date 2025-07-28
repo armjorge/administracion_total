@@ -7,7 +7,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import TimeoutException
-from datetime import datetime
+from datetime import datetime, date
 import yaml
 from glob import glob
 import pandas as pd
@@ -17,7 +17,7 @@ import re
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from gspread_dataframe import set_with_dataframe
-
+from modulos_git.business_management import business_management
 
 
 def open_folder(os_path):
@@ -254,145 +254,119 @@ def site_operation(ACTIONS, driver, timeout,download_folder, data_access):
         os.remove(f)
     print(message_print("Fin de la descarga y movimiento de archivos a sus carpetas, continúa procesando los CSV en cada carpeta (Opción 2)"))    
 
-def processing_csv(working_folder, data_access):
-    now = datetime.now()
-    yyyy = str(now.year)
-    mm = f"{now.month:02}"    
-    while True:
-        processing_choice = input("¿Quieres procesar 1) La carpeta del mes 2) Todas las carpetas? (Escribe 1 o 2): ")
+def processing_csv_post_cut(working_folder, data_access):
+    """
+    Busca en working_folder la subcarpeta del mes actual YYYY-MM, 
+    selecciona el archivo más reciente de cada grupo (_credit.csv, _debit.csv, _stdMFI.csv),
+    avisa si hay retraso, y carga tres DataFrames: df_credit, df_debit y df_mfi.
+    """
+    message_print("Procesando CSVs posteriores al corte")
+    # Fecha de hoy
+    today: date = datetime.now().date()
 
-        if processing_choice == "1":
-            path = os.path.abspath(os.path.join(working_folder, f"{yyyy}-{mm}"))
-            working_folder = [path]
-            break
+    # Carpeta del mes actual
+    yyyy = f"{today.year:04d}"
+    mm   = f"{today.month:02d}"
+    monthly_folder = os.path.join(working_folder, f"{yyyy}-{mm}")
 
-        elif processing_choice == "2":
-            # List only folders matching pattern ####-##
-            all_entries = os.listdir(working_folder)
-            folders = [
-                os.path.join(working_folder, d)
-                for d in all_entries
-                if os.path.isdir(os.path.join(working_folder, d)) and re.match(r"^\d{4}-\d{2}$", d)
-            ]
-            working_folder = folders
-            break
+    if not os.path.isdir(monthly_folder):
+        print(f"La carpeta correspondiente al mes {mm} de {yyyy} no se encontró, descarga archivos y regresa.")
+        return None, None, None
 
+    # Definimos sufijos y claves
+    groups = {
+        "_credit.csv": "credit",
+        "_debit.csv":  "debit",
+        "_stdMFI.csv": "mfi"
+    }
+    latest_paths = {}
+
+    def _parse_date_from_name(fn: str) -> date:
+        # fn ejemplo: "2025-07-25_credit.csv" -> extrae "2025-07-25"
+        basename = os.path.basename(fn)
+        date_str = basename.split("_")[0]  # "2025-07-25"
+        try:
+            return datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            return date.min  # para que quede al final si no coincide
+
+    # Iterar por cada grupo, buscar y seleccionar el más reciente
+    for suffix, key in groups.items():
+        files = [f for f in os.listdir(monthly_folder) if f.endswith(suffix)]
+        if not files:
+            print(f"No existe archivo para la categoría {suffix}.")
+            continue
+
+        # Ordenar por fecha extraída del nombre, descendente
+        files.sort(key=lambda fn: _parse_date_from_name(fn), reverse=True)
+        newest = files[0]
+        file_date = _parse_date_from_name(newest)
+        delay = (today - file_date).days
+        if delay != 0:
+            print(f"El archivo de {suffix} tiene {delay} día(s) de retraso con respecto a hoy ({today}).")
+        latest_paths[key] = os.path.join(monthly_folder, newest)
+
+    # Helper para leer CSV
+    def _read_csv(p):
+        if data_access and hasattr(data_access, "read_csv"):
+            return data_access.read_csv(p)
         else:
-            print("⚠️ Entrada no válida. Por favor escribe '1' o '2'.")
+            return pd.read_csv(p)
 
-    print(message_print('Impresión del working_folder'), working_folder)
-    print(message_print("Iniciando la función para procesar CSVs"))
+    # Cargar DataFrames (o None si no había archivo)
+    df_credit = _read_csv(latest_paths["credit"]) if "credit" in latest_paths else None
+    df_debit  = _read_csv(latest_paths["debit"])  if "debit"  in latest_paths else None
+    df_mfi    = _read_csv(latest_paths["mfi"])    if "mfi"    in latest_paths else None    
+    print(latest_paths["credit"])
+    print(df_credit.head(20))
 
-    headers_credit = data_access['BANORTE_credit_headers']
-    headers_debit  = data_access['BANORTE_debit_headers']
-    headers_MFI    = data_access['BANORTE_month_free_headers']
-    for folder in working_folder:
-        dict_files = {}
+    for key, df in (("credit", df_credit),
+                    ("debit",  df_debit),
+                    ("mfi",    df_mfi)):
+        if df is not None and key in latest_paths:
+            df["filename"] = os.path.basename(latest_paths[key])
 
-        csv_files = glob(os.path.join(folder, "*.csv"))
-        for file in csv_files:
-            file_info = {}
+    ## CARGAR EN GOOGLE SHEET
 
-            # 🔍 Fecha tomada desde el nombre del archivo
-            filename = os.path.basename(file)
-            match = re.match(r"(\d{4}-\d{2}-\d{2})_", filename)
+    # Define the scope
+    scope = ['https://spreadsheets.google.com/feeds',
+            'https://www.googleapis.com/auth/drive']
+    # Add your service account file
+    json_path = os.path.join(working_folder, 'armjorgeSheets.json')
+    creds = ServiceAccountCredentials.from_json_keyfile_name(json_path, scope)  # Ensure the correct path
+    # Authorize the client sheet
+    client = gspread.authorize(creds)
+    url = data_access['url_google_sheet']
+    spreadsheet = client.open_by_url(url)
 
-            if match:
-                timestamp_str = match.group(1)  # e.g., '2025-07-11'
-                dt = datetime.strptime(timestamp_str, "%Y-%m-%d")
-            else:
-                print(f"⚠️ No se pudo extraer la fecha del archivo: {filename}")
-                continue  # Salta este archivo si no tiene fecha válida
 
-            file_info['year'] = dt.year
-            file_info['month'] = dt.month
-            file_info['day'] = dt.day
-            #timestamp = os.path.getmtime(file)  # getctime para creación, getmtime para modificación
-            #dt = datetime.fromtimestamp(timestamp)
-            file_info['year'] = dt.year
-            file_info['month'] = dt.month
-            file_info['day'] = dt.day
+    def update_google_sheet(sheet_name, df):
+        ws = spreadsheet.worksheet(sheet_name)
+        ws.clear()
 
-            try:
-                try:
-                    df = pd.read_csv(file, nrows=1, encoding='utf-8')
-                except UnicodeDecodeError:
-                    df = pd.read_csv(file, nrows=1, encoding='latin1')  # fallback
-                
-                file_headers = list(df.columns)
+        # 1) If you want literal strings "11/14/2024" in M/D/YYYY...
+        if 'Fecha' in df.columns:
+            df['Fecha'] = (
+                pd.to_datetime(df['Fecha'], errors='coerce')
+                .dt.strftime('%m/%d/%Y')      # → "11/14/2024"
+            )
 
-                if file_headers == headers_credit:
-                    file_info['type'] = 'credit'
-                elif file_headers == headers_debit:
-                    file_info['type'] = 'debit'
-                elif file_headers == headers_MFI:
-                    file_info['type'] = 'MFI'
-                else:
-                    print(f"⚠️ Archivo '{os.path.basename(file)}' no coincide con ninguna categoría.")
-                    continue  # saltar este archivo si no coincide
-            except Exception as e:
-                print(f"❌ Error al leer '{os.path.basename(file)}': {e}")
-                continue
+        values = [df.columns.tolist()] + df.values.tolist()
 
-            dict_files[file] = file_info  # ✅ Guardar todo en el diccionario principal
+        # 3) Use RAW so Sheets never re-parse them as ISO
+        spreadsheet.values_update(
+            f"{sheet_name}!A1",
+            params={'valueInputOption': 'RAW'},
+            body={'values': values}
+        )
 
-        print("\n📁 Archivos categorizados:")
-        print(dict_files)
-        for f, info in dict_files.items():
-            print(f"  - {os.path.basename(f)} → {info['type']} ({info['day']:02d}/{info['month']:02d}/{info['year']})")
-        #print(dict_files)
-        print(message_print("Procesando y agrupando archivos por fecha y tipo"))
-        # Agrupar archivos por tipo
-        credit_files = {k: v for k, v in dict_files.items() if v['type'] == 'credit'}
-        debit_files  = {k: v for k, v in dict_files.items() if v['type'] == 'debit'}
-        mfi_files    = {k: v for k, v in dict_files.items() if v['type'] == 'MFI'}
-
-        # Ordenar cada grupo por día (más reciente primero)
-        credit_files = dict(sorted(credit_files.items(), key=lambda x: x[1]['day'], reverse=True))
-        debit_files  = dict(sorted(debit_files.items(),  key=lambda x: x[1]['day'], reverse=True))
-        mfi_files    = dict(sorted(mfi_files.items(),    key=lambda x: x[1]['day'], reverse=True))
-        print(message_print("Finalizó la agrupación por tipo y por día"))
-        print(credit_files, debit_files, mfi_files)
-        grouped_files = defaultdict(list)
-
-        for file_path, info in dict_files.items():
-            key = (info['year'], info['month'], info['day'], info['type'])
-            grouped_files[key].append(file_path)
-
-        for (year, month, day, typ), file_list in grouped_files.items():
-            dataframes = []
-            loaded_hashes = set()
-
-            for each_file in file_list:
-                try:
-                    try:
-                        df = pd.read_csv(each_file, encoding='utf-8')
-                    except UnicodeDecodeError:
-                        df = pd.read_csv(each_file, encoding='latin1')  # fallback
-                    df_hash = pd.util.hash_pandas_object(df, index=True).sum()
-
-                    if df_hash in loaded_hashes:
-                        print(f"⚠️ Archivo duplicado: {os.path.basename(each_file)} — será ignorado.")
-                        continue
-
-                    loaded_hashes.add(df_hash)
-                    dataframes.append(df)
-
-                except Exception as e:
-                    print(f"❌ Error al procesar '{os.path.basename(each_file)}': {e}")
-
-            if not dataframes:
-                print(f"⚠️ No se cargaron archivos válidos para {year}-{month}-{day} ({typ})")
-                continue
-
-            final_df = pd.concat(dataframes, ignore_index=True)
-
-            csv_folder = os.path.join(working_folder, f"{year}-{month:02d}")
-            create_directory_if_not_exists(csv_folder)
-
-            csv_path = os.path.join(csv_folder, f"{year}-{month:02d}-{day:02d}_{typ}.csv")
-            final_df.to_csv(csv_path, index=False)
-            print(f"✅ Guardado: {os.path.basename(csv_path)}")
+    # Update the sheets with dataframes from df_informacion_actualizada
+    print("\nCargando a google sheet los archivos encontrados\n")
+    #df_credit['filename'] = 
+    print('latest paths', latest_paths)
+    update_google_sheet('Credit_current', df_credit)
+    update_google_sheet('Debit_current', df_debit)    
+    return df_credit, df_debit, df_mfi
 
 
 
@@ -805,8 +779,8 @@ def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_cr
     while True:
         choice = input(f"""{message_print('¿Qué deseas hacer?')}
     1. Descargar, renombrar y mover archivos CSV corrientes (no cortes, no cerrados)
-    2. Procesar archivos CSV
-    3. Cargar mes de corte
+    2. Procesar archivos CSV posteriores al corte
+    3. Procesar archivos CSV al mes corte
     4. Cargar gastos posterior al corte
     5. Actualizar el google sheet
     0. Salir
@@ -817,8 +791,8 @@ def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_cr
             timeout = 20
             site_operation(ACTIONS, driver, timeout, download_folder, data_access)            
         elif choice == "2":
-            print("📦 Procesando archivos CSV...")
-            processing_csv(working_folder, data_access)
+            print("📦 Procesando archivos CSV después del corte...")
+            processing_csv_post_cut(working_folder, data_access)
         elif choice == "3":
             print("💰 Cargando corte de crédito cerrado")
             credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit, check_only=False, debit = False)
@@ -842,6 +816,7 @@ def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_cr
 
 if __name__ == "__main__":
     folder_root = os.getcwd()
+    business_management(folder_root)
     # 1) Añade al path la carpeta donde está df_multi_match.py
     libs_dir = os.path.join(folder_root, "Librería")
     print(libs_dir)
