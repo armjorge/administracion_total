@@ -816,7 +816,7 @@ def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_cr
 
 if __name__ == "__main__":
     folder_root = os.getcwd()
-    business_management(folder_root)
+    
     # 1) Añade al path la carpeta donde está df_multi_match.py
     libs_dir = os.path.join(folder_root, "Librería")
     print(libs_dir)
@@ -835,4 +835,13 @@ if __name__ == "__main__":
         {"type": "click",     "by": By.XPATH, "locator":'//*[@id="btnAceptarloginPasswordAsync"]'}
     ],} 
     # 3) Llama a tu función pasándola como parámetro
-    total_management(load_chrome, folder_root, ACTIONS, process_closed_credit_accounts, export_pickle)
+    while True:
+        choice = input("Elige 1) para la información bancaria y 2) para el módulo de gastos y presupuestos: ").strip()
+        if choice == "1":
+            total_management(load_chrome, folder_root, ACTIONS, process_closed_credit_accounts, export_pickle)
+            break
+        elif choice == "2":
+            business_management(folder_root)
+            break
+        else:
+            print("⚠️ Elige una opción válida (1 o 2). Inténtalo de nuevo.")
