@@ -18,6 +18,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from gspread_dataframe import set_with_dataframe
 from modulos_git.business_management import business_management
+import numpy as np
 
 
 def open_folder(os_path):
@@ -260,7 +261,7 @@ def processing_csv_post_cut(working_folder, data_access):
     selecciona el archivo más reciente de cada grupo (_credit.csv, _debit.csv, _stdMFI.csv),
     avisa si hay retraso, y carga tres DataFrames: df_credit, df_debit y df_mfi.
     """
-    message_print("Procesando CSVs posteriores al corte")
+    print(message_print("Procesando CSVs posteriores al corte"))
     # Fecha de hoy
     today: date = datetime.now().date()
 
@@ -317,8 +318,9 @@ def processing_csv_post_cut(working_folder, data_access):
     df_credit = _read_csv(latest_paths["credit"]) if "credit" in latest_paths else None
     df_debit  = _read_csv(latest_paths["debit"])  if "debit"  in latest_paths else None
     df_mfi    = _read_csv(latest_paths["mfi"])    if "mfi"    in latest_paths else None    
-    print(latest_paths["credit"])
-    print(df_credit.head(20))
+    
+    #print(latest_paths["credit"])
+    #print(df_credit.head(20))
 
     for key, df in (("credit", df_credit),
                     ("debit",  df_debit),
@@ -339,19 +341,25 @@ def processing_csv_post_cut(working_folder, data_access):
     url = data_access['url_google_sheet']
     spreadsheet = client.open_by_url(url)
 
+    def clean_for_sheets(df):
+        # convert any +Inf/−Inf to NaN, then replace all NaNs
+        df = df.replace([np.inf, -np.inf], np.nan)
+        return df.fillna("")   # or .fillna(0) if you want zeros
 
     def update_google_sheet(sheet_name, df):
         ws = spreadsheet.worksheet(sheet_name)
         ws.clear()
 
         # 1) If you want literal strings "11/14/2024" in M/D/YYYY...
+        print(f"\tCambiando el tipo de la columna Fecha a date de la hoja {sheet_name}\n")
         if 'Fecha' in df.columns:
             df['Fecha'] = (
                 pd.to_datetime(df['Fecha'], errors='coerce')
                 .dt.strftime('%m/%d/%Y')      # → "11/14/2024"
             )
+        df_clean = clean_for_sheets(df)
 
-        values = [df.columns.tolist()] + df.values.tolist()
+        values = [df_clean.columns.tolist()] + df_clean.values.tolist()
 
         # 3) Use RAW so Sheets never re-parse them as ISO
         spreadsheet.values_update(
@@ -363,7 +371,7 @@ def processing_csv_post_cut(working_folder, data_access):
     # Update the sheets with dataframes from df_informacion_actualizada
     print("\nCargando a google sheet los archivos encontrados\n")
     #df_credit['filename'] = 
-    print('latest paths', latest_paths)
+    #print('latest paths', latest_paths)
     update_google_sheet('Credit_current', df_credit)
     update_google_sheet('Debit_current', df_debit)    
     return df_credit, df_debit, df_mfi
@@ -758,7 +766,8 @@ def upload_data(working_folder, data_access):
 
 
 def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_credit_accounts, export_pickle): 
-    working_folder= os.path.join(folder_root, "Implementación")
+    working_folder= os.path.join(folder_root, "Implementación", "Info Bancaria")
+    not os.path.exists(working_folder) and create_directory_if_not_exists(working_folder) 
     data_access = yaml_creation(working_folder)
     downloads = "Temporal Downloads"
     download_folder = os.path.join(working_folder, downloads)
