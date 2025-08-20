@@ -98,11 +98,16 @@ class SheetsUpdater:
     
     def update_multiple_sheets(self, dataframes_dict):
         """Actualiza múltiples hojas con un diccionario de DataFrames"""
-        # Mapeo de tipos a nombres de hojas
+        # ✅ MAPEO EXPANDIDO: Incluir hojas cerradas
         sheet_mapping = {
+            # Hojas corrientes (existentes)
             'credit': 'Credit_current',
             'debit': 'Debit_current',
-            'mfi': 'MFI_current'
+            'mfi': 'MFI_current',
+            
+            # ✅ NUEVO: Hojas cerradas
+            'credit_closed': 'Credit_closed',
+            'debit_closed': 'Debit_closed'
         }
         
         print("\n📊 Actualizando Google Sheets...")
@@ -110,22 +115,8 @@ class SheetsUpdater:
         for data_type, df in dataframes_dict.items():
             if df is not None and not df.empty:
                 sheet_name = sheet_mapping.get(data_type, data_type)
+                print(f"📋 Subiendo {data_type} → {sheet_name} ({df.shape[0]} registros)")
                 self.update_sheet(sheet_name, df)
             else:
-                print(f"⚠️ No hay datos para actualizar: {data_type}")
-    
-    def upload_consolidated_data(self, dataframes_dict):
-        """Sube datos consolidados (para opción 3)"""
-        sheet_mapping = {
-            'credit_closed': 'Credit_closed',
-            'credit_current': 'Credit_current', 
-            'debit_closed': 'Debit_closed',
-            'debit_current': 'Debit_current'
-        }
-        
-        print("\n📈 Subiendo datos consolidados...")
-        
-        for data_type, df in dataframes_dict.items():
-            if df is not None and not df.empty:
                 sheet_name = sheet_mapping.get(data_type, data_type)
-                self.update_sheet(sheet_name, df)
+                print(f"⚠️ No hay datos para actualizar: {data_type} → {sheet_name}")

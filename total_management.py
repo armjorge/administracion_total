@@ -966,7 +966,7 @@ def total_management():
         else:
             print("⚠️ Opción no válida. Por favor elige 1, 2, 3, 4 o 5 .\n")
 
-if __name__ == "__main__"
+if __name__ == "__main__":
     # PUNTO DE ENTRADA DEL PROGRAMA
     # Inicializa las variables globales necesarias
     initialize_globals()

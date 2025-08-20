@@ -1,0 +1,26 @@
+# Dependencias del proyecto administracion_total
+# Instalación: pip install -r requirements.txt
+
+# Procesamiento de datos
+pandas>=1.3.0
+numpy>=1.21.0
+
+# Automatización web
+selenium>=4.0.0
+
+# Google Sheets
+gspread>=5.0.0
+gspread-dataframe>=3.3.0
+oauth2client>=4.1.3
+
+# Configuración
+PyYAML>=6.0
+
+# HTTP requests
+requests>=2.25.0
+
+# Sistema y archivos (built-in Python)
+# os, sys, datetime, glob, collections, subprocess, pickle, re - incluidos en Python estándar
+
+# Excel files
+openpyxl>=3.1.0  # ✅ AGREGADO: Para leer/escribir archivos Excel

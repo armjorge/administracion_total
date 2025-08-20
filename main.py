@@ -28,15 +28,18 @@ class TotalManagementApp:
         
         while True:
             choice = input(message_print(
-                "Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n"
+                "Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n\t 0 para salir"
             )).strip()
 
             if choice == "1":
                 self.banking_manager.run_banking_menu()
-                break
+                
             elif choice == "2":
                 self.business_manager.run_business_menu()
-                break
+                
+            elif choice == "0":
+                print("👋 ¡Hasta luego!")
+                break                
             else:
                 print("\n⚠️ Elige una opción válida (1 o 2). Inténtalo de nuevo.\n")
 
