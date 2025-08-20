@@ -1,157 +1,219 @@
 # 💰 Administración Total
 
-> *Alcanzar un objetivo a largo plazo es la consecuencia de tomar decisiones hoy que simplemente generen el patrón que proyectado en el tiempo alcanzará el objetivo.*
+> *Un sistema funcional de gestión financiera personal que automatiza el procesamiento de datos bancarios y proporciona análisis claro para tomar decisiones informadas.*
 
 ## 🎯 Objetivo del Proyecto
 
-**Sistema integral de gestión financiera personal** que automatiza la descarga, procesamiento y análisis de datos bancarios para proporcionar información clara y oportuna que facilite la toma de decisiones financieras.
+**Sistema integral de gestión financiera personal y empresarial** que procesa automáticamente datos bancarios y gestiona presupuestos empresariales para proporcionar análisis detallado de gastos, ingresos y flujos de caja a través de dashboards interactivos.
 
 ### 📊 Propuesta de Valor
-El valor agregado está en mostrar de modo simple y automatizado el estado de gastos e ingresos en un dashboard para que los usuarios tengan la información suficiente para tomar decisiones financieras informadas.
+Transformar archivos CSV bancarios en información financiera estructurada y gestionar presupuestos empresariales con análisis automático que permita tomar decisiones basadas en datos reales tanto personales como empresariales.
 
 ## 🏗️ Arquitectura del Sistema
 
-### 📥 **Módulo de Extracción de Datos**
-**Inputs automatizados:**
-- 🏦 **Archivos CSV bancarios**: Descarga automatizada desde Banorte usando Selenium
-- 💳 **Datos de crédito/débito**: Procesamiento de transacciones por categoría
-- 📄 **CFDIs de nómina**: Extracción de datos de ingresos desde XML
-- 🗓️ **Cortes mensuales**: Manejo de fechas de corte de tarjetas de crédito
+### 📥 **Módulo de Procesamiento Bancario**
+**Inputs soportados:**
+- 🏦 **Archivos CSV de Banorte**: Procesamiento de transacciones de débito y crédito
+- 💳 **Estados de cuenta**: Clasificación automática por tipo de transacción
+- 🗓️ **Gestión de períodos**: Manejo de cortes mensuales y fechas de facturación
+- 📄 **Datos históricos**: Carga y procesamiento de información acumulada
 
-**Outputs estructurados:**
-- 📊 **DataFrame Débito**: Hoja de meses cerrados + mes en curso
-- 💳 **DataFrame Crédito**: Cortes cerrados + después del corte + MSI
-- 💰 **DataFrame Ingresos**: Derivados de archivos XML de nómina
+**Outputs generados:**
+- 📊 **DataFrames estructurados**: Débito, crédito e ingresos organizados
+- 🏷️ **Categorización automática**: Etiquetado inteligente de transacciones
+- 📈 **Análisis temporal**: Comparaciones mes a mes y tendencias
+- ☁️ **Sincronización cloud**: Datos actualizados en Google Sheets
 
-### 🔄 **Módulo de Procesamiento**
-- **Automatización web**: Selenium para descarga de archivos bancarios
-- **Clasificación inteligente**: Categorización automática por headers CSV
-- **Gestión de fechas**: Manejo de cortes y períodos de facturación
-- **Sincronización**: Google Sheets para acceso multiplataforma
-- **Persistencia**: Sistema de pickle para datos históricos
+### 💼 **Módulo de Gestión Empresarial**
+**Funcionalidades empresariales:**
+- 📊 **Gestión de presupuestos**: Control de gastos e ingresos por categorías empresariales
+- 💰 **Flujos de caja**: Análisis de entrada y salida de efectivo empresarial
+- 🎯 **Metas presupuestales**: Seguimiento de objetivos financieros empresariales
+- 📈 **Reportes empresariales**: Análisis específico para toma de decisiones de negocio
+- 🔄 **Sincronización independiente**: Gestión separada de datos empresariales en Google Sheets
 
-### 📈 **Módulo de Análisis** 
-- **Etiquetado por renglón**: Asignación de dos etiquetas y notas por transacción
-- **Migración de rótulos**: Transferencia automática de etiquetas entre períodos
-- **Completitud de datos**: Validación del 100% de conceptos categorizados
-- **Análisis mensual**: Cálculo de gastos (débito vs crédito) e ingresos
-- **Integración en la nube**: Carga automática a Google Sheets del usuario
+### 🔄 **Motor de Análisis Dual**
+- **Clasificación inteligente**: Detección automática de tipos de transacción personal y empresarial
+- **Etiquetado persistente**: Sistema de categorías separado para personal y empresarial
+- **Validación de datos**: Verificación de completitud y consistencia en ambos módulos
+- **Análisis de patrones**: Identificación de tendencias tanto personales como empresariales
+- **Reportes automáticos**: Generación de resúmenes mensuales diferenciados
+
+### 📊 **Dashboards Especializados**
+- **Notebook bancario**: Análisis visual personal en Jupyter
+- **Dashboard empresarial**: Análisis específico de presupuestos y flujos empresariales
+- **Google Sheets dual**: Acceso separado a datos personales y empresariales
+- **Métricas integradas**: KPIs personales y empresariales unificados
 
 ## 🚀 Características Principales
 
-### 🤖 **Automatización Completa**
-- ✅ Descarga automática de archivos bancarios
-- ✅ Procesamiento y categorización de transacciones
-- ✅ Sincronización con Google Sheets
-- ✅ Gestión de archivos históricos
+### 🤖 **Procesamiento Automatizado**
+- ✅ Lectura automática de archivos CSV bancarios
+- ✅ Clasificación inteligente de transacciones personales y empresariales
+- ✅ Detección de duplicados y validación de datos
+- ✅ Backup automático de información procesada
 
-### 📊 **Análisis Financiero**
-- ✅ Seguimiento de gastos por categoría
-- ✅ Análisis de patrones de consumo
-- ✅ Comparación período sobre período
-- ✅ Alertas de fechas de corte
+### 📊 **Análisis Financiero Completo**
+- ✅ Seguimiento detallado por categorías personales y empresariales
+- ✅ Análisis de ingresos y gastos mensuales diferenciados
+- ✅ Gestión de presupuestos empresariales con alertas
+- ✅ Identificación de patrones y tendencias en ambos contextos
 
-### 🔧 **Gestión de Datos**
-- ✅ Backup automático en formato pickle
-- ✅ Validación de integridad de datos
-- ✅ Manejo de duplicados
-- ✅ Archivado por períodos
+### 🔧 **Gestión Inteligente Dual**
+- ✅ Sistema de etiquetas persistente para personal y empresarial
+- ✅ Manejo automático de archivos históricos separados
+- ✅ Sincronización bidireccional con Google Sheets múltiples
+- ✅ Interfaces especializadas para cada módulo
 
 ## 📁 Estructura del Proyecto
 
 ```
 administracion_total/
-├── 📊 total_management.py          # Módulo principal de gestión bancaria
-├── 📓 Administración total.ipynb   # Notebook de análisis interactivo
-├── 📚 Librería/                    # Librerías auxiliares
-│   ├── chrome_driver_load.py      # Automatización web
+├── 📊 total_management.py          # Motor principal del sistema
+├── 📓 Administración total.ipynb   # Dashboard interactivo bancario
+├── 📚 Librería/                    # Módulos de procesamiento
+│   ├── chrome_driver_load.py      # Herramientas de automatización web
 │   ├── credit_closed.py           # Procesamiento de crédito
-│   ├── xml_handling.py            # Manejo de CFDIs
-│   └── folder_files_handling.py   # Gestión de archivos
-├── 🔧 modulos_git/                 # Módulos de negocio
-│   └── business_management.py     # Gestión empresarial
+│   ├── xml_handling.py            # Manejo de archivos XML/CFDI
+│   └── folder_files_handling.py   # Gestión de archivos y directorios
+├── 🔧 modulos_git/                 # Módulos especializados
+│   └── business_management.py     # Motor de gestión empresarial
 ├── 💾 Implementación/              # Datos y configuración
-│   ├── Info Bancaria/             # Archivos bancarios procesados
-│   └── Presupuesto/               # Datos presupuestales
-├── 📋 docs/                        # Documentación
-│   └── diagrams/                  # Diagramas UML
-└── 🎨 uml/                         # Código fuente de diagramas
+│   ├── Info Bancaria/             # Archivos CSV y datos bancarios procesados
+│   │   ├── armjorgeSheets.json    # Credenciales Google Sheets
+│   │   ├── passwords.yaml         # Configuración del sistema
+│   │   └── *.pkl                  # Archivos de backup bancario
+│   └── Presupuesto/               # Módulo empresarial
+│       ├── *.pkl                  # Backups de datos empresariales
+│       └── datos_empresariales/   # Archivos de presupuestos y flujos
+└── 📋 README.md                    # Documentación del proyecto
 ```
 
 ## 🛠️ Instalación y Configuración
 
 ### Requisitos del Sistema
 - Python 3.8+
-- Google Chrome (para automatización web)
-- Credenciales de Google Sheets API
+- Jupyter Notebook para análisis interactivo
+- Cuenta de Google con acceso a Google Sheets
 
 ### Dependencias Principales
 ```bash
-pip install pandas selenium gspread oauth2client pyyaml numpy openpyxl
+pip install pandas numpy matplotlib seaborn jupyter
+pip install gspread oauth2client openpyxl pyyaml
+pip install selenium  # Opcional, para automatización futura
 ```
 
 ### Configuración Inicial
-1. **Configurar credenciales Google Sheets**:
-   - Colocar `armjorgeSheets.json` en `Implementación/Info Bancaria/`
+1. **Configurar Google Sheets API**:
+   ```bash
+   # Colocar credenciales en:
+   Implementación/Info Bancaria/armjorgeSheets.json
+   ```
 
-2. **Crear archivo de configuración**:
-   - El sistema creará automáticamente `passwords.yaml` en el primer uso
-
-3. **Configurar datos bancarios**:
-   - Completar credenciales de Banorte en `passwords.yaml`
+2. **Configurar el sistema**:
+   ```bash
+   # El archivo passwords.yaml se genera automáticamente
+   # Editar según sea necesario para configuraciones específicas
+   ```
 
 ## 🚀 Uso del Sistema
 
-### Ejecución Principal
-```bash
-python total_management.py
-```
+### Flujo de Trabajo Principal
 
-### Opciones Disponibles
-1. **🏦 Información Bancaria**: Gestión completa de datos bancarios
-   - Descarga automática de CSVs
-   - Procesamiento posterior al corte
-   - Manejo de archivos de corte mensual
+1. **📥 Preparación de datos**:
+   - **Bancarios**: Descargar archivos CSV desde Banorte → `Implementación/Info Bancaria/`
+   - **Empresariales**: Preparar datos de presupuestos → `Implementación/Presupuesto/`
 
-2. **📊 Gestión Empresarial**: Módulo de presupuestos y gastos empresariales
+2. **🔄 Procesamiento**:
+   ```bash
+   python total_management.py
+   # Opciones disponibles:
+   # 1. Información Bancaria (gestión personal)
+   # 2. Gestión Empresarial (presupuestos y flujos)
+   ```
 
-### Flujo de Trabajo Típico
-1. **Descarga**: El sistema descarga automáticamente archivos del banco
-2. **Procesamiento**: Categoriza y organiza las transacciones
-3. **Análisis**: Procesa datos posteriores al corte
-4. **Sincronización**: Sube información a Google Sheets
-5. **Backup**: Guarda datos históricos en formato pickle
+3. **📊 Análisis**:
+   ```bash
+   # Análisis bancario personal:
+   jupyter notebook "Administración total.ipynb"
+   
+   # Análisis empresarial:
+   # Se ejecuta directamente desde el módulo business_management.py
+   ```
+
+### Opciones del Sistema
+
+**🏦 Información Bancaria (Módulo Personal):**
+- Procesamiento completo de archivos CSV bancarios
+- Categorización automática de transacciones personales
+- Generación de reportes mensuales personales
+- Sincronización con Google Sheets personal
+
+**📊 Gestión Empresarial (Módulo Business):**
+- Gestión completa de presupuestos empresariales
+- Control de flujos de caja empresariales
+- Análisis de desviaciones presupuestales
+- Reportes empresariales especializados
+- Sincronización con Google Sheets empresarial separado
 
 ## 🔄 Funcionalidades Avanzadas
 
-### Gestión de Fechas de Corte
-- Registro automático de fechas de corte mensuales
-- Validación de archivos faltantes
-- Alertas para descargas pendientes
+### Sistema de Etiquetado Inteligente Dual
+- **Categorización personal**: Basada en patrones de gastos personales
+- **Categorización empresarial**: Enfocada en categorías de negocio
+- **Persistencia separada**: Las etiquetas se mantienen independientemente
+- **Validación diferenciada**: Verificación específica para cada contexto
 
-### Procesamiento Inteligente
-- Detección automática de tipo de archivo (crédito/débito/MSI)
-- Fusión de archivos duplicados
-- Manejo de diferentes encodings
+### Análisis Temporal Especializado
+- **Comparaciones personales**: Gastos e ingresos período sobre período
+- **Análisis empresarial**: Presupuesto vs real, flujos de caja
+- **Detección de tendencias**: Patrones diferenciados personal vs empresarial
+- **Proyecciones duales**: Estimaciones para ambos contextos
 
-### Integración Cloud
-- Sincronización automática con Google Sheets
-- Formato optimizado para análisis
-- Acceso multiplataforma
+### Integración Cloud Separada
+- **Google Sheets personal**: Datos bancarios y análisis personal
+- **Google Sheets empresarial**: Presupuestos, flujos y métricas de negocio
+- **Formato optimizado**: Estructura específica para cada tipo de análisis
+- **Actualización independiente**: Sincronización separada por módulo
 
-## 🤝 Contribuir
+## 📈 Dashboards Especializados
 
-Este proyecto utiliza:
-- **Git Submodules** para módulos de negocio
-- **PlantUML** para documentación de arquitectura
-- **Jupyter Notebooks** for análisis interactivo
+### Dashboard Bancario Personal
+- 📊 **Gráficos de gastos por categoría personal**
+- 📈 **Tendencias mensuales de ingresos y gastos**
+- 💳 **Análisis de uso de crédito vs débito**
+- 🎯 **Métricas clave personales**
 
-## 📄 Licencia
+### Dashboard Empresarial
+- 💼 **Control presupuestal por categorías empresariales**
+- 📊 **Análisis de flujos de caja**
+- 🎯 **Seguimiento de metas presupuestales**
+- 📈 **KPIs empresariales y alertas de desviaciones**
+- 🚨 **Alertas de presupuesto y recomendaciones**
 
-Proyecto de uso personal para gestión financiera automatizada.
+## 🔧 Mantenimiento y Backup
+
+- **Backup automático dual**: Archivos .pkl separados para personal y empresarial
+- **Historial completo**: Datos acumulados independientes por módulo
+- **Validación de integridad**: Verificación automática en ambos contextos
+- **Recuperación especializada**: Sistemas independientes de restauración
+
+## 📊 Salidas del Sistema
+
+### Módulo Bancario Personal
+1. **Google Sheets personal** con transacciones categorizadas
+2. **Notebook interactivo** con análisis visual personal
+3. **Archivos de backup bancario** (.pkl)
+4. **Reportes mensuales personales**
+
+### Módulo Empresarial
+1. **Google Sheets empresarial** con presupuestos y flujos
+2. **Reportes presupuestales** automáticos
+3. **Archivos de backup empresarial** (.pkl)
+4. **Análisis de desviaciones** y alertas empresariales
 
 ---
 
-*Desarrollado para automatizar y simplificar la gestión financiera personal mediante tecnologías modernas de procesamiento de datos y automatización web.* 
+*Sistema probado y funcional para gestión financiera personal y empresarial automatizada. Desarrollado para convertir datos bancarios y presupuestales en información accionable para ambos contextos.*
 
 
