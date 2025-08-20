@@ -95,23 +95,26 @@ def create_google_sheets_updater(working_folder, data_access):
         """Actualiza una hoja específica de Google Sheets con un DataFrame."""
         ws = spreadsheet.worksheet(sheet_name)
         ws.clear()  # Limpia contenido existente
-
         # Convierte fechas al formato estadounidense para Google Sheets
         print(f"\tCambiando el tipo de la columna Fecha a date de la hoja {sheet_name}\n")
         if 'Fecha' in df.columns:
-            df['Fecha'] = (
-                pd.to_datetime(df['Fecha'], errors='coerce')
-                .dt.strftime('%m/%d/%Y')      # Formato MM/DD/YYYY
-            )
+            # Imprimir cómo entran los primeros 3 datos
+            print(f"\t\tFechas originales (primeras 3): {df['Fecha'].head(3).tolist()}")
+            
+            # Convertir a datetime especificando formato dd/mm/yyyy y luego formatear con tiempo para Google Sheets
+            df['Fecha'] = pd.to_datetime(df['Fecha'], format='%d/%m/%Y', errors='coerce').dt.strftime('%m/%d/%Y %H:%M:%S')
+            
+            # Imprimir cómo salen después del método
+            print(f"\t\tFechas convertidas (primeras 3): {df['Fecha'].head(3).tolist()}")
         
         # Limpia datos automáticamente y prepara para subida
         df_clean = clean_for_sheets(df)
         values = [df_clean.columns.tolist()] + df_clean.values.tolist()
 
-        # Sube datos usando formato RAW para evitar reinterpretación
+        # Sube datos usando formato USER_ENTERED para interpretación automática
         spreadsheet.values_update(
             f"{sheet_name}!A1",
-            params={'valueInputOption': 'RAW'},
+            params={'valueInputOption': 'USER_ENTERED'},
             body={'values': values}
         )
 
@@ -522,7 +525,7 @@ def processing_csv_post_cut(working_folder, data_access):
     # Crear la función de actualización al inicio de processing_csv_post_cut
     update_google_sheet = create_google_sheets_updater(working_folder, data_access)
     # Agregar función para generar el MFI
-    
+
     # Actualiza las hojas de Google Sheets con los datos actuales
     print("\nCargando a google sheet los archivos encontrados\n")
     update_google_sheet('Credit_current', df_credit)
@@ -963,7 +966,7 @@ def total_management():
         else:
             print("⚠️ Opción no válida. Por favor elige 1, 2, 3, 4 o 5 .\n")
 
-if __name__ == "__main__":
+if __name__ == "__main__"
     # PUNTO DE ENTRADA DEL PROGRAMA
     # Inicializa las variables globales necesarias
     initialize_globals()
