@@ -1,6 +1,7 @@
 
 import os 
 import sys 
+import shutil
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
@@ -19,7 +20,42 @@ from oauth2client.service_account import ServiceAccountCredentials
 from gspread_dataframe import set_with_dataframe
 from modulos_git.business_management import business_management
 import numpy as np
+import pickle
 
+# Variables globales
+folder_root = None
+chrome_driver_load = None
+ACTIONS = None
+process_closed_credit_accounts = None
+export_pickle = None
+
+def initialize_globals():
+    """Inicializa las variables globales necesarias para el funcionamiento del programa."""
+    global folder_root, chrome_driver_load, ACTIONS, process_closed_credit_accounts, export_pickle
+    
+    folder_root = os.getcwd()
+    
+    # Añade al path la carpeta donde están las librerías
+    libs_dir = os.path.join(folder_root, "Librería")
+    sys.path.insert(0, libs_dir)
+
+    # Importa las funciones necesarias
+    from chrome_driver_load import load_chrome
+    from credit_closed import process_closed_credit_accounts as pcc, export_pickle as ep
+    
+    chrome_driver_load = load_chrome
+    process_closed_credit_accounts = pcc
+    export_pickle = ep
+
+    ACTIONS = {
+        "https://www.banorte.com/wps/portal/ixe/Home/inicio": [
+            {"type": "send_keys", "by": By.XPATH, "locator": '//*[@id="userid"]',    "value": "Abre el YAML y escriibe tu usuario"},
+            {"type": "click",     "by": By.XPATH, "locator": '//*[@id="btn_lgn_entrar"]'},
+            {"type": "send_keys", "by": By.XPATH, "locator": '//*[@id="passwordLogin"]',    "value": "Abre el YAML y escriibe tu contraseña"},
+            {"type": "wait_user", "value": "Por favor ingresa tu token y presiona enter en la terminal"},
+            {"type": "click",     "by": By.XPATH, "locator":'//*[@id="btnAceptarloginPasswordAsync"]'}
+        ],
+    }
 
 def open_folder(os_path):
     """Opens a folder in the appropriate file explorer depending on the OS."""
@@ -114,7 +150,10 @@ def add_to_gitignore(root_directory, path_to_add):
     else:
         print(f"'{relative_output}' ya está listado en .gitignore.")
 
-def site_operation(ACTIONS, driver, timeout,download_folder, data_access):
+def site_operation(ACTIONS, driver, timeout,download_folder, data_access, path_al_corte = None, al_corte = False):
+
+    # Navegación y automatización 
+    
     for url, steps in ACTIONS.items():
         print(f"\n🔗 Navegando a {message_print(url)}")
         driver.get(url)
@@ -157,10 +196,13 @@ def site_operation(ACTIONS, driver, timeout,download_folder, data_access):
             print(f"    ✗ Timeout en paso {idx} ({typ} @ {loc}): {e}")           
     input(message_print("Presina enter para cerrar el navegador"))
     driver.quit()
-    ## 
-    ##
+
+    #                                      #
+    # Preparación y lectura de encabezados #
+    #                                      #
+
     print(message_print("Renombrando y fusionando los archivos descargados para mover a su carpeta"))    
-    ##
+
     working_folder = os.path.abspath(os.path.join(download_folder, '..'))
 
     headers_credit = data_access['BANORTE_credit_headers']
@@ -215,45 +257,117 @@ def site_operation(ACTIONS, driver, timeout,download_folder, data_access):
     for file_path, info in dict_files.items():
         key = (info['year'], info['month'], info['day'], info['type'])
         grouped_files[key].append(file_path)
+    # ─────────────────────────────────────────────────────────────────────────
+    # MODO NORMAL (al_corte = False): igual que antes, guardar por día/tipo
+    # ─────────────────────────────────────────────────────────────────────────
+    if not al_corte:
+        for (year, month, day, typ), file_list in grouped_files.items():
+            print("Vamos a fusionar archivos del mismo mes, día y tipo (Debit, Credit, MFI) diferente cuenta")
+            dataframes = []
+            loaded_hashes = set()
 
-    for (year, month, day, typ), file_list in grouped_files.items():
-        print("Vamos a fusionar archivos del mismo mes, día y tipo (Debit, Credit, MFI) diferente cuenta")
-        dataframes = []
-        loaded_hashes = set()
-        for each_file in file_list:
-            try:
+            for each_file in file_list:
                 try:
-                    df = pd.read_csv(each_file, encoding='utf-8')
-                except UnicodeDecodeError:
-                    df = pd.read_csv(each_file, encoding='latin1')  # fallback
-                df_hash = pd.util.hash_pandas_object(df, index=True).sum()
+                    try:
+                        df = pd.read_csv(each_file, encoding='utf-8')
+                    except UnicodeDecodeError:
+                        df = pd.read_csv(each_file, encoding='latin1')
+                    df_hash = pd.util.hash_pandas_object(df, index=True).sum()
 
-                if df_hash in loaded_hashes:
-                    print(f"⚠️ Archivo duplicado: {typ} {os.path.basename(each_file)} — será ignorado en la fusión.")
-                    continue
+                    if df_hash in loaded_hashes:
+                        print(f"⚠️ Archivo duplicado: {typ} {os.path.basename(each_file)} — será ignorado en la fusión.")
+                        continue
 
-                loaded_hashes.add(df_hash)
-                dataframes.append(df)
+                    loaded_hashes.add(df_hash)
+                    dataframes.append(df)
+                except Exception as e:
+                    print(f"❌ Error al procesar '{os.path.basename(each_file)}': {e}")
 
-            except Exception as e:
-                print(f"❌ Error al procesar '{os.path.basename(each_file)}': {e}")
+            if not dataframes:
+                print(f"⚠️ No se cargaron archivos válidos para {year}-{month}-{day} (Tipo: {typ})")
+                continue
 
-        if not dataframes:
-            print(f"⚠️ No se cargaron archivos válidos para {year}-{month}-{day} (Tipo: {typ})")
-            continue
+            final_df = pd.concat(dataframes, ignore_index=True)
 
-        final_df = pd.concat(dataframes, ignore_index=True)
+            csv_folder = os.path.join(working_folder, f"{year}-{month:02d}")
+            not os.path.exists(csv_folder) and create_directory_if_not_exists(csv_folder)
 
-        csv_folder = os.path.join(working_folder, f"{year}-{month:02d}")
-        not os.path.exists(csv_folder) and create_directory_if_not_exists(csv_folder)
+            csv_path = os.path.join(csv_folder, f"{year}-{month:02d}-{day:02d}_{typ}.csv")
+            final_df.to_csv(csv_path, index=False)
+            print(f"✅ Archivo movido: {os.path.basename(csv_path)}")
 
-        csv_path = os.path.join(csv_folder, f"{year}-{month:02d}-{day:02d}_{typ}.csv")
-        final_df.to_csv(csv_path, index=False)
-        print(f"✅ Archivo movido: {os.path.basename(csv_path)}")    
-    for f, info in dict_files.items():
-        print(f"🗑️ Eliminando {os.path.basename(f)} debido a que ya se procesó")
-        os.remove(f)
-    print(message_print("Fin de la descarga y movimiento de archivos a sus carpetas, continúa procesando los CSV en cada carpeta (Opción 2)"))    
+        # Limpiar descargas
+        for f, _ in dict_files.items():
+            print(f"🗑️ Eliminando {os.path.basename(f)} debido a que ya se procesó")
+            os.remove(f)
+
+        print(message_print("Fin de la descarga y movimiento de archivos a sus carpetas, continúa procesando los CSV en cada carpeta (Opción 2)"))
+        return
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # MODO AL CORTE (al_corte = True): un solo CSV mensual YYYY-MM.csv
+    # ─────────────────────────────────────────────────────────────────────────
+    # Validaciones mínimas
+    if al_corte and not path_al_corte:
+        raise ValueError("path_al_corte es requerido cuando al_corte=True")
+
+    now = datetime.now()
+    year = now.year
+    month = now.month
+    final_name = f"{year}-{month:02d}.csv"
+
+    # 1) Fusionar TODOS los CSV del download_folder (evitando duplicados exactos)
+    print(message_print("Fusionando todos los CSV descargados en un único archivo mensual"))
+    merged_frames = []
+    seen_hashes = set()
+    for file_path in dict_files.keys():
+        try:
+            try:
+                df = pd.read_csv(file_path, encoding='utf-8')
+            except UnicodeDecodeError:
+                df = pd.read_csv(file_path, encoding='latin1')
+            df_hash = pd.util.hash_pandas_object(df, index=True).sum()
+            if df_hash in seen_hashes:
+                print(f"⚠️ Duplicado exacto detectado y omitido: {os.path.basename(file_path)}")
+                continue
+            seen_hashes.add(df_hash)
+            merged_frames.append(df)
+        except Exception as e:
+            print(f"❌ Error al procesar '{os.path.basename(file_path)}': {e}")
+
+    if not merged_frames:
+        print("⚠️ No se encontraron CSV válidos para fusionar en modo al_corte.")
+        return
+
+    merged_df = pd.concat(merged_frames, ignore_index=True)
+
+    # 2) Asegurar que en download_folder quede SOLO el archivo final
+    #    Guardamos primero como temporal, luego borramos los demás y renombramos.
+    temp_path = os.path.join(download_folder, "__merged_temp.csv")
+    merged_df.to_csv(temp_path, index=False)
+    print(f"📝 Archivo temporal creado: {os.path.basename(temp_path)}")
+
+    for f in glob(os.path.join(download_folder, "*.csv")):
+        if os.path.abspath(f) != os.path.abspath(temp_path):
+            print(f"🗑️ Eliminando original: {os.path.basename(f)}")
+            os.remove(f)
+
+    final_download_path = os.path.join(download_folder, final_name)
+    # Si por algún motivo existe, lo quitamos para renombrar limpio
+    if os.path.exists(final_download_path):
+        os.remove(final_download_path)
+    os.rename(temp_path, final_download_path)
+    print(f"✅ Archivo final en descargas: {os.path.basename(final_download_path)}")
+
+    # 3) Mover a path_al_corte con el nombre YYYY-MM.csv
+    create_directory_if_not_exists(path_al_corte)
+    dest_path = os.path.join(path_al_corte, final_name)
+    # Si existe en destino, lo sustituimos
+    if os.path.exists(dest_path):
+        os.remove(dest_path)
+    shutil.move(final_download_path, dest_path)
+    print(f"📦 El archivo {os.path.basename(final_name)} se movió a {os.path.basename(path_al_corte)}")
+
 
 def processing_csv_post_cut(working_folder, data_access):
     """
@@ -378,9 +492,15 @@ def processing_csv_post_cut(working_folder, data_access):
 
 
 
-def credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit, check_only=True, debit = False):
-    pickle_file = os.path.join(path_TC_closed, 'pickle_database.pkl')
+def credit_closed_by_month(path_TC_closed, headers_credit, check_only=True, debit = False):
+    global process_closed_credit_accounts, export_pickle
     
+    pickle_file = os.path.join(path_TC_closed, 'pickle_database.pkl')
+    # Obtener año y mes actuales
+    now = datetime.now()
+    year = now.year
+    month = now.month
+
     if check_only:
         if not os.path.exists(pickle_file):
             print(f"⚠️ No se encontró el archivo: {pickle_file}")
@@ -397,10 +517,6 @@ def credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, expor
         #print("🧾 Archivos únicos encontrados:")
         #print(cleaned_files)
 
-        # Obtener año y mes actuales
-        now = datetime.now()
-        year = now.year
-        month = now.month
 
         # Crear lista de nombres esperados
         expected = [f"{year}-{m:02d}.csv" for m in range(month, 0, -1)]
@@ -420,173 +536,11 @@ def credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, expor
 
     else:
         process_closed_credit_accounts(path_TC_closed, headers_credit, open_folder, debit)
-        choice = input("¿Quieres exportar la información al corte a tu carpeta de descargas? (si/no): ").strip().lower()
+        print("Exportando información post-corte a tu carpeta de descargas")
+        output_tc_al_corte = os.path.expanduser(f"~/Downloads/Info al corte.xlsx")
+        export_pickle(pickle_file, output_tc_al_corte)
+        print(f"✅ Archivo exportado a: {output_tc_al_corte}")
 
-        if choice == "si":
-            if debit: 
-                filename= 'Debito_al_corte'
-            else: 
-                filename = 'TC_al_corte'
-            output_tc_al_corte = os.path.expanduser(f"~/Downloads/{filename}.xlsx")
-            export_pickle(pickle_file, output_tc_al_corte)
-            print(f"✅ Archivo exportado a: {output_tc_al_corte}")
-
-
-def credit_current_month(working_folder, check_only=True):
-    """
-    Para cada subcarpeta de `working_folder` con nombre 'YYYY-MM':
-      1) Lee todos los archivos '*_credit.csv' (nombres 'YYYY-MM-DD…_credit.csv').
-      2) Carga o crea '{YYYY-MM}_credit_summary.xlsx'.
-      3) Añade sólo los renglones nuevos (comparando todos los campos excepto 'filename').
-      4) Guarda el resumen actualizado.
-    """
-    folder_pattern = re.compile(r'^\d{4}-\d{2}$')
-    print(message_print('Iniciando el script de gastos después del corte'))
-    for folder_name in os.listdir(working_folder):
-        folder_path = os.path.join(working_folder, folder_name)
-        if not os.path.isdir(folder_path) or not folder_pattern.match(folder_name):
-            continue
-        #print('Folder de trabajo', os.path.basename(working_folder))
-        #print('Folder de trabajo', os.path.basename(folder_name))
-        # ——— Sección MFI ———
-        # 1) Agregar lista de archivos MFI dentro de la subcarpeta
-        mfi_pattern = os.path.join(folder_path, '*_MFI.csv')
-        MFI_files = sorted(glob(mfi_pattern))
-        
-        if MFI_files:
-            # 2) Quedarse solo con el más reciente (último en el sort lexicográfico YYYY-MM-DD_MFI.csv)
-            mfi_file = MFI_files[-1]
-            basename = os.path.basename(mfi_file)
-            file_date = datetime.strptime(basename.split('_')[0], '%Y-%m-%d')
-            # 3) Definir ruta de resumen dentro de la misma subcarpeta
-            MFI_summary_path = os.path.join(
-                folder_path,
-                f"{folder_name}_MFI.xlsx"
-            )
-
-            # 4) Leer todo el CSV
-            try:
-                df_brut_msi = pd.read_csv(
-                    mfi_file,
-                    encoding='utf-8-sig',
-                    sep=',',
-                    skipinitialspace=True  # drop spaces immediately after commas
-                )
-            except Exception:
-                df_brut_msi = pd.read_csv(mfi_file, encoding='utf-8')
-            print(repr(df_brut_msi.columns.tolist()))
-            # 5) Normalizar fecha y fijar al mes actual
-            #MFI_files_date = mfi_file has the format 2025-06-04_MFI.csv, we need to extract yyyy-mm-dd as date time 
-            df_brut_msi['Fecha de operación'] = pd.to_datetime(
-                df_brut_msi['Fecha de operación'],
-                format='%d/%m/%Y'
-            ).apply(lambda x: x.replace(month=file_date.month))
-
-            # 6) Función para duplicar filas con offset de meses
-            def duplicate_rows_with_incremented_months(df):
-                new_rows = []
-                for _, row in df.iterrows():
-                    pagos, suffix = row['Pagos pendientes'].split('/')
-                    count = int(pagos)
-                    for i in range(count):
-                        new_row = row.copy()
-                        new_row['Fecha de operación'] = (
-                            new_row['Fecha de operación']
-                            + pd.DateOffset(months=i+1)
-                        )
-                        new_row['Pagos pendientes'] = f"{count-i-1:02d}/{suffix}"
-                        new_rows.append(new_row)
-                duplicated = pd.DataFrame(new_rows, columns=df.columns)
-                return pd.concat([df, duplicated], ignore_index=True)\
-                         .sort_values(by='Fecha de operación')
-            print(df_brut_msi.head(10))
-            # 7) Generar DataFrame final e ignorar duplicados entre offsets
-            df_brut_msi = duplicate_rows_with_incremented_months(df_brut_msi)
-
-            # 8) Guardar el resumen a Excel
-            df_brut_msi.to_excel(MFI_summary_path, index=False)
-            print(f"✅ Guardado MFI summary: {MFI_summary_path}")
-        else:
-            df_brut_msi = pd.DataFrame()
-            print(f"⚠️ No se encontraron archivos *_MFI.csv en {folder_path}")
-            
-
-        # ——— Fin sección MFI ———
-        # """"
-        # """"        
-        # ——— Inicia sección Crédito después del corte ———        
-        print('\nInicia sección Crédito después del corte')
-        csv_files = sorted(glob(os.path.join(folder_path, '*_credit.csv')))
-        summary_path = os.path.join(working_folder, f"{folder_name}", f"{folder_name}_credit_summary.xlsx")
-
-        # Carga o crea df_summary
-        if os.path.exists(summary_path):
-            df_summary = pd.read_excel(summary_path)
-            df_summary['Fecha'] = pd.to_datetime(
-                df_summary['Fecha'],
-                dayfirst=True,               # 'dd/mm/YYYY'
-                format='%d/%m/%Y',
-                errors='coerce'              # bad parse → NaT
-            )            
-        else:
-            df_summary = pd.DataFrame()
-
-        for csv_file in csv_files:
-            base = os.path.basename(csv_file)
-            df_new = pd.read_csv(csv_file)
-            df_new['filename'] = base
-
-            # Columnas de datos (sin 'filename')
-            data_cols = [c for c in df_new.columns if c != 'filename']
-
-            if df_summary.empty:
-                # Primera lectura: todo entra
-                df_summary = df_new.copy()
-            else:
-                # Para cada renglón de df_new, sólo agregar si no existe ya en df_summary
-                for _, row in df_new.iterrows():
-                    iguales = (df_summary[data_cols] == row[data_cols]).all(axis=1)
-                    if not iguales.any():
-                        # concatena ese único renglón
-                        df_summary = pd.concat(
-                            [df_summary, pd.DataFrame([row])],
-                            ignore_index=True
-                        )
-        # Guardar el resumen actualizado
-        df_summary.to_excel(summary_path, index=False)
-
-        #print(df_summary.head(10))
-        if not df_brut_msi.empty:
-            print(message_print('Uniendo información de MSI con información después del corte'))
-
-            df_summary['Fecha'] = pd.to_datetime(
-                df_summary['Fecha'],
-                dayfirst=True,
-                errors='coerce'
-            )
-
-            for _, row in df_brut_msi.iterrows():
-                fecha_op = row['Fecha de operación'].date()   # datetime.date
-                concepto = row['Concepto']
-                cargo    = row['Mensualidad']
-
-                # now compare against the plain-date series
-                existe = (
-                    (df_summary['Fecha'] == fecha_op) &
-                    (df_summary['Concepto'] == concepto) &
-                    (df_summary['Cargo'] == cargo)
-                ).any()
-
-                if not existe:
-                    nueva = {
-                        'Fecha':    fecha_op,
-                        'Concepto': concepto,
-                        'Cargo':    cargo,
-                        'filename': basename
-                    }
-                    df_summary = pd.concat([df_summary, pd.DataFrame([nueva])], ignore_index=True)
-                # Guardar el resumen actualizado
-                df_summary.to_excel(summary_path, index=False)
 
 def upload_data(working_folder, data_access):
     """
@@ -763,9 +717,125 @@ def upload_data(working_folder, data_access):
     update_google_sheet('Debit_current', df_debito)    
     
 
+def generador_conceptos(folder): 
+    print(message_print("Iniciando el módulo para generar los conceptos y categorías presupuestales"))
+    # 1. Generar hoja de conceptos para un folder dado: 
+    #Necesitamos: a cada folder con la nomenclatura: buscar los _deb, _cred y _mfi.  
+    #Acomodar por orden del nombre: más nuevo al principio
+    #Cargar el actual si es que tiene datos llenos
+    #Agregar columnas estandarizadas si es que aún no tiene
+    #Generar un nuevo df si es que noe existe. 
+    #Ir agregando nuevos renglones y la fecha en la que aparecieron
+    #Agregar la info previa si es que el renglón ya estaba
+    #Guardar como {yyyy}-{mm} xlsx con las hojas _credit _debit _mfi 
+    # 2. Generar una copia del archivo de cortes débito y cortes crédito
+    # Buscar el renglón excepto la columna de fecha para _debit: cortes débito y _credit: cortes crédito. 
+    # Para el correspondiente {yyyy}-{mm}.csv : buscarn en su carpeta correspondiente, agregar columnas faltantes si es que no las tiene. 
+    # Llenar con info previa 
+    # No sustituir la info del renglón si el archivo trae un nan 
+    # Guardar como {año} - {corte} {_debit} o _credit
+    # Cargar a google sheet. 
 
 
-def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_credit_accounts, export_pickle): 
+# --- Helpers ---------------------------------------------------------------
+
+def parse_fecha_ddmmyyyy(text):
+    try:
+        return datetime.strptime(text.strip(), "%d/%m/%Y").date()
+    except ValueError:
+        return None
+
+def fechas_corte_tarjeta(working_folder):
+    """
+    Retorna (fecha_corte: date, estatus_fecha_corte: bool)
+    estatus_fecha_corte es True si ya existía o se guardó una fecha válida.
+    """
+    
+    today = date.today()
+    year = today.year
+    month = today.month  # 1..12
+    index_row = month - 1  # para índice 0-based
+
+    date_file = os.path.join(working_folder, f"{year} df_fechas_corte.pickle")
+    months_name = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
+
+    # Si no existe, crear dataframe base
+    if not os.path.exists(date_file):
+        df_fechas = pd.DataFrame({
+            'Fecha corte dd-mm-yyyy': [None] * 12,
+            'Mes': months_name
+        })
+        # Asegurar orden correcto
+        df_fechas = df_fechas.set_index('Mes').loc[months_name].reset_index()
+        with open(date_file, "wb") as f:
+            pickle.dump(df_fechas, f)
+        print(f"{date_file} creado con meses predefinidos.")
+
+    # Cargar
+    with open(date_file, "rb") as f:
+        df_fechas = pickle.load(f)
+
+    # Validar orden de meses; reordenar si hace falta
+    if list(df_fechas['Mes']) != months_name:
+        df_fechas = df_fechas.set_index('Mes').reindex(months_name).reset_index()
+
+    # Obtener fecha existente
+    raw_fecha = df_fechas.at[index_row, 'Fecha corte dd-mm-yyyy']
+    fecha_corte = None
+    estatus_fecha_corte = False
+
+    if raw_fecha:
+        if isinstance(raw_fecha, str):
+            fecha_corte = parse_fecha_ddmmyyyy(raw_fecha)
+        elif isinstance(raw_fecha, date):
+            fecha_corte = raw_fecha
+        elif isinstance(raw_fecha, datetime):
+            fecha_corte = raw_fecha.date()
+
+    if not fecha_corte:
+        # No hay fecha válida: pedirla
+        while True:
+            entrada = input(f"Escribe la fecha de corte para {months_name[index_row]} en formato dd/mm/YYYY: ").strip()
+            parsed = parse_fecha_ddmmyyyy(entrada)
+            if parsed:
+                fecha_corte = parsed
+                df_fechas.at[index_row, 'Fecha corte dd-mm-yyyy'] = fecha_corte.strftime("%d/%m/%Y")
+                with open(date_file, "wb") as f:
+                    pickle.dump(df_fechas, f)
+                print(f"Fecha de corte para {months_name[index_row]} guardada: {fecha_corte.strftime('%d/%m/%Y')}")
+                estatus_fecha_corte = True
+                break
+            else:
+                print("Formato inválido. Intenta de nuevo (ejemplo: 15/08/2025).")
+    else:
+        # Ya había fecha válida
+        estatus_fecha_corte = True
+        print(f"Fecha registrada existente para {months_name[index_row]}: {fecha_corte.strftime('%d/%m/%Y')}")
+        # Preguntar si se quiere corregir, con timeout de 3 segundos si está disponible
+        choice = input("¿Quieres corregir la fecha de corte? (Si o No): ").strip().lower()
+        if choice in ("si", "sí", "s"):
+            while True:
+                nueva = input(f"Escribe la nueva fecha de corte para {months_name[index_row]} en formato dd/mm/YYYY: ").strip()
+                parsed = parse_fecha_ddmmyyyy(nueva)
+                if parsed:
+                    fecha_corte = parsed
+                    df_fechas.at[index_row, 'Fecha corte dd-mm-yyyy'] = fecha_corte.strftime("%d/%m/%Y")
+                    with open(date_file, "wb") as f:
+                        pickle.dump(df_fechas, f)
+                    print(f"Fecha de corte actualizada: {fecha_corte.strftime('%d/%m/%Y')}")
+                    break
+                else:
+                    print("Formato inválido. Intenta de nuevo.")
+        else:
+            # No quiere corregir; se mantiene la existente
+            pass
+
+    return fecha_corte, estatus_fecha_corte
+
+def total_management(): 
+    global folder_root, chrome_driver_load, ACTIONS, process_closed_credit_accounts, export_pickle
+    
     working_folder= os.path.join(folder_root, "Implementación", "Info Bancaria")
     not os.path.exists(working_folder) and create_directory_if_not_exists(working_folder) 
     data_access = yaml_creation(working_folder)
@@ -777,45 +847,48 @@ def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_cr
     add_to_gitignore(folder_root, working_folder)
     headers_credit = data_access['BANORTE_credit_headers']
     headers_debit  = data_access['BANORTE_debit_headers']
-    credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit)
+    credit_closed_by_month(path_TC_closed, headers_credit)
     
     ACTIONS["https://www.banorte.com/wps/portal/ixe/Home/inicio"][0]["value"] = data_access["BANORTE_user"]
     ACTIONS["https://www.banorte.com/wps/portal/ixe/Home/inicio"][2]["value"] = data_access["BANORTE_password"]
 
     print("Cargando el usuario y contraseña registrados en el YAML")
-
+    timeout = 20
 
     while True:
         choice = input(f"""{message_print('¿Qué deseas hacer?')}
     1. Descargar, renombrar y mover archivos CSV corrientes (no cortes, no cerrados)
     2. Procesar archivos CSV posteriores al corte
     3. Procesar archivos CSV al mes corte
-    4. Cargar gastos posterior al corte
-    5. Actualizar el google sheet
     0. Salir
     Elige una opción (1, 2 o 3): """)
 
         if choice == "1":
             driver = chrome_driver_load(download_folder)
-            timeout = 20
             site_operation(ACTIONS, driver, timeout, download_folder, data_access)            
         elif choice == "2":
             print("📦 Procesando archivos CSV después del corte...")
             processing_csv_post_cut(working_folder, data_access)
         elif choice == "3":
-            print("💰 Cargando corte de crédito cerrado")
-            credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit, check_only=False, debit = False)
-            print("💰 Cargando corte de débito al mes")
-            credit_closed_by_month(path_DEBIT_closed, process_closed_credit_accounts, export_pickle, headers_debit, check_only=False, debit = True)
-            # Aquí puedes llamar a la función correspondiente
-            
-        elif choice == "4":
-            print("💰 Cargando gastos posterior al corte")
-            credit_current_month(working_folder, check_only=True)
-        
-        elif choice == "5":
-            print("💰 Cargando gastos posterior al corte")
-            upload_data(working_folder, data_access)
+            # Crédito 
+            temporal_tc_files = os.path.join(path_TC_closed, 'Descargas temporales')
+            not os.path.exists(working_folder) and create_directory_if_not_exists(temporal_tc_files) 
+            print("Confirmando si hay un archivo de crédito para el último corte")
+            fecha_corte, estatus_fecha_corte = fechas_corte_tarjeta(path_TC_closed)
+            # Declaramos la fecha de hoy en el mismo formato que fecha_corte
+            today = date.today()
+            if today <= fecha_corte :
+                print("💰 Esperando fecha de corte")
+            elif today > fecha_corte :
+                print("Nos falta el archivo al último corte, se va a abrir una ventana, por favor descarga: ")
+                driver = chrome_driver_load(temporal_tc_files)
+                site_operation(ACTIONS, driver, timeout, path_TC_closed, data_access, path_TC_closed, al_corte=True)
+                input("Presiona enter si ya descargaste el archivo correspondiente al último corte")
+                credit_closed_by_month(path_TC_closed, headers_credit, check_only=False, debit = False)
+            # Débito
+            print(message_print("Confirmando si hay un archivo de débito para el mes cerrado anterior"))
+            credit_closed_by_month(path_DEBIT_closed, headers_debit, check_only=False, debit = True)
+         
         elif choice == "0":
             print("👋 ¡Hasta luego!")
             break            
@@ -824,33 +897,18 @@ def total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_cr
 
 
 if __name__ == "__main__":
-    folder_root = os.getcwd()
-    
-    # 1) Añade al path la carpeta donde está df_multi_match.py
-    libs_dir = os.path.join(folder_root, "Librería")
-    print(libs_dir)
-    sys.path.insert(0, libs_dir)
+    # Inicializar variables globales
+    initialize_globals()
 
-    # 2) Ahora importa la función directamente
-    from chrome_driver_load import load_chrome
-    from credit_closed import process_closed_credit_accounts, export_pickle
-
-    ACTIONS = {
-    "https://www.banorte.com/wps/portal/ixe/Home/inicio": [
-        {"type": "send_keys", "by": By.XPATH, "locator": '//*[@id="userid"]',    "value": "Abre el YAML y escriibe tu usuario"},
-        {"type": "click",     "by": By.XPATH, "locator": '//*[@id="btn_lgn_entrar"]'},
-        {"type": "send_keys", "by": By.XPATH, "locator": '//*[@id="passwordLogin"]',    "value": "Abre el YAML y escriibe tu contraseña"},
-        {"type": "wait_user", "value": "Por favor ingresa tu token y presiona enter en la terminal"},
-        {"type": "click",     "by": By.XPATH, "locator":'//*[@id="btnAceptarloginPasswordAsync"]'}
-    ],} 
-    # 3) Llama a tu función pasándola como parámetro
     while True:
-        choice = input("Elige 1) para la información bancaria y 2) para el módulo de gastos y presupuestos: ").strip()
+        choice = input(message_print("Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n")).strip()
+
         if choice == "1":
-            total_management(load_chrome, folder_root, ACTIONS, process_closed_credit_accounts, export_pickle)
+            total_management()
             break
         elif choice == "2":
             business_management(folder_root)
             break
         else:
-            print("⚠️ Elige una opción válida (1 o 2). Inténtalo de nuevo.")
+            print("\n⚠️ Elige una opción válida (1 o 2). Inténtalo de nuevo.\n")
+

@@ -1,0 +1,76 @@
+@startuml
+title Flujo detallado de total_management(chrome_driver_load, folder_root, ACTIONS, process_closed_credit_accounts, export_pickle)
+
+start
+:'working_folder' = join(folder_root, "Implementación", "Info Bancaria");
+if (¿Existe working_folder?) then (sí)
+else (no)
+  :create_directory_if_not_exists(working_folder);
+endif
+:data_access = yaml_creation(working_folder);
+
+:downloads = "Temporal Downloads";
+:download_folder = join(working_folder, downloads);
+:path_TC_closed   = join(working_folder, "TC al corte");
+:path_DEBIT_closed= join(working_folder, "Débito al mes");
+:create_directory_if_not_exists([working_folder, download_folder, path_DEBIT_closed]);
+:add_to_gitignore(folder_root, working_folder);
+
+:headers_credit = data_access["BANORTE_credit_headers"];
+:headers_debit  = data_access["BANORTE_debit_headers"];
+
+:credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit);
+
+note right
+Pre-carga de credenciales dinamiza ACTIONS:
+- user -> BANORTE_user
+- password -> BANORTE_password
+end note
+
+:ACTIONS[".../inicio"][0].value = data_access["BANORTE_user"];
+:ACTIONS[".../inicio"][2].value = data_access["BANORTE_password"];
+
+:print("Cargando el usuario y contraseña registrados en el YAML");
+:driver = chrome_driver_load(download_folder);
+:timeout = 20;
+
+repeat
+:choice = input(menú 1..5, 0 salir);
+
+if (choice == "1"?) then (sí)
+  :site_operation(ACTIONS, driver, timeout, download_folder, data_access);
+elseif (choice == "2"?) then (sí)
+  :print("📦 Procesando archivos CSV después del corte...");
+  :processing_csv_post_cut(working_folder, data_access);
+elseif (choice == "3"?) then (sí)
+  :print("Confirmando si hay un archivo de crédito para el último corte");
+  :fecha_corte, estatus = fechas_corte_tarjeta(path_TC_closed);
+  :today = date.today();
+
+  if (today <= fecha_corte?) then (sí)
+    :print("💰 Esperando fecha de corte");
+  else (no)
+    :print("Falta archivo al último corte -> abrir ventana descarga");
+    :site_operation(ACTIONS, driver, timeout, path_TC_closed, data_access);
+    :input("Presiona enter al terminar la descarga");
+    :credit_closed_by_month(path_TC_closed, process_closed_credit_accounts, export_pickle, headers_credit, check_only=false, debit=false);
+  endif
+
+  :print("Confirmando débito mes cerrado anterior");
+  :credit_closed_by_month(path_DEBIT_closed, process_closed_credit_accounts, export_pickle, headers_debit, check_only=false, debit=true);
+
+elseif (choice == "4"?) then (sí)
+  :print("💰 Cargando gastos posterior al corte");
+  :credit_current_month(working_folder, check_only=true);
+elseif (choice == "5"?) then (sí)
+  :print("💰 Cargando gastos posterior al corte");
+  :upload_data(working_folder, data_access);
+elseif (choice == "0"?) then (sí)
+  :print("👋 ¡Hasta luego!");
+  stop
+else (inválida)
+  :print("⚠️ Opción no válida. Elige 1, 2, 3, 4, 5 o 0");
+endif
+
+repeat while (choice != "0")
+@enduml

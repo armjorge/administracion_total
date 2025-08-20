@@ -38,7 +38,7 @@ def read_create_pickle(pickle_file, columns):
     return df_tc_closed
 
 def process_closed_credit_accounts(folder_TC_al_corte, columns, open_folder, debit):
-
+    print(f"Iniciando la función process_closed_credit_accounts, parámetro folder_TC_al_corte: {folder_TC_al_corte}")
     pickle_file = os.path.join(folder_TC_al_corte, 'pickle_database.pkl')
     df_readed = read_create_pickle(pickle_file, columns)
     # 🔍 Archivos registrados anteriormente (limpios sin hash)
