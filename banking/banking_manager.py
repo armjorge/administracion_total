@@ -189,7 +189,7 @@ class BankingManager:
                 df_credito_al_corte = pickle.load(f)
             
             # Procesar file_name en crédito: quitar desde '.csv__HASH__' en adelante
-            df_credito_al_corte['file_name_clean'] = df_credito_al_corte['file_name'].str.split('__HASH__').str[0]
+            df_credito_al_corte['file_name'] = df_credito_al_corte['file_name'].str.split('__HASH__').str[0]
             
             # NUEVA LÍNEA: Quitar también la extensión .csv
             df_credito_al_corte['file_name_clean'] = df_credito_al_corte['file_name_clean'].str.replace('.csv', '', regex=False)
@@ -731,8 +731,11 @@ class BankingManager:
                         
                         # Si tiene columna file_name, limpiarla
                         if 'file_name' in df_export.columns:
-                            df_export['file_name_clean'] = df_export['file_name'].str.split('__HASH__').str[0]
-                        
+                            df_export['file_name'] = df_export['file_name'].str.split('__HASH__').str[0]
+                        if 'file_date' in df_export.columns:
+                            df_export.drop('file_date', axis=1, inplace=True)
+                        if 'filename' in df_export.columns:
+                            df_export.rename(columns={'filename': 'file_name'}, inplace=True)
                         # Exportar a Excel
                         df_export.to_excel(writer, sheet_name=sheet_name, index=False)
                         print(f"   ✅ Hoja '{sheet_name}': {df.shape[0]} registros")
