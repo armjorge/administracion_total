@@ -57,6 +57,7 @@ class BankingManager:
             elif choice == "4":
                 # Llamar a la función para conectar a la base de datos
                 self.sql_operations.sql_business_mining()
+                self.sql_operations.sql_menu()
             elif choice == "0":
                 print("👋 ¡Hasta luego!")
                 return
