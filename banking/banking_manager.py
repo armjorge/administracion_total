@@ -10,6 +10,7 @@ import pandas as pd
 from glob import glob 
 import hashlib
 from collections import defaultdict
+from .sql_operations import SQL_Operations
 
 class BankingManager:
     def __init__(self, working_folder, data_access, folder_root):
@@ -31,9 +32,8 @@ class BankingManager:
         self.file_processor = FileProcessor(working_folder, data_access) 
         self.web_automation = WebAutomation(self.download_folder, folder_root) #Aquí le dices dónde descargar. 
         self.sheets_updater = SheetsUpdater(working_folder, data_access)
+        self.sql_operations = SQL_Operations(data_access)
         
-        # Cargar módulos externos
-        #self._load_external_modules()
     
     def run_banking_menu(self):
         """Ejecuta el menú principal del sistema bancario"""
@@ -43,6 +43,7 @@ class BankingManager:
         1. Descargar, renombrar y mover archivos CSV corrientes
         2. Exportar CSV's a local y cargar a google sheets
         3. Procesar archivos CSV al mes corte
+        4. Conectar a la base de datos SQL
         0. Salir
         Elige una opción: """)
 
@@ -52,12 +53,15 @@ class BankingManager:
                 self._cargar_gsheet_exportar_excel()
             elif choice == "3":
                 self._process_monthly_cut_files()
-                self.process_closed_credit_accounts()
+                self._process_closed_credit_accounts()
+            elif choice == "4":
+                # Llamar a la función para conectar a la base de datos
+                self.sql_operations.sql_business_mining()
             elif choice == "0":
                 print("👋 ¡Hasta luego!")
                 return
             else:
-                print("⚠️ Opción no válida. Por favor elige 1, 2, 3 o 0.\n")
+                print("⚠️ Opción no válida. Por favor elige 1, 2, 3, 4 o 0.\n")
     
     def _process_current_files(self):
         """Procesa archivos corrientes (Opción 1)"""
