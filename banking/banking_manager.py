@@ -53,7 +53,7 @@ class BankingManager:
                 self._cargar_gsheet_exportar_excel()
             elif choice == "3":
                 self._process_monthly_cut_files()
-                self._process_closed_credit_accounts()
+                self.process_closed_credit_accounts()
             elif choice == "4":
                 # Llamar a la función para conectar a la base de datos
                 self.sql_operations.sql_business_mining()
@@ -197,7 +197,7 @@ class BankingManager:
             df_credito_al_corte['file_name'] = df_credito_al_corte['file_name'].str.split('__HASH__').str[0]
             
             # NUEVA LÍNEA: Quitar también la extensión .csv
-            df_credito_al_corte['file_name_clean'] = df_credito_al_corte['file_name_clean'].str.replace('.csv', '', regex=False)
+            df_credito_al_corte['file_name'] = df_credito_al_corte['file_name'].str.replace('.csv', '', regex=False)
             
             # Convertir fechas de corte a datetime y truncar al mes
             df_fechas_de_corte['fecha_corte_dt'] = pd.to_datetime(
@@ -226,7 +226,7 @@ class BankingManager:
             # 2) ✅ NUEVO: Verificar archivos esperados CON Y SIN sufijo
             expected_files_with_suffix = [f"{current_period}_credit", f"{previous_period}_credit"]
             expected_files_without_suffix = [f"{current_period}", f"{previous_period}"]
-            existing_files = df_credito_al_corte['file_name_clean'].unique()
+            existing_files = df_credito_al_corte['file_name'].unique()
             
             print(f"   📋 Archivos esperados (con sufijo): {expected_files_with_suffix}")
             print(f"   📋 Archivos esperados (sin sufijo): {expected_files_without_suffix}")
@@ -292,10 +292,10 @@ class BankingManager:
                 df_debito_al_corte = pickle.load(f)
             
             # Procesar file_name en débito: quitar desde '.csv__HASH__' en adelante
-            df_debito_al_corte['file_name_clean'] = df_debito_al_corte['file_name'].str.split('__HASH__').str[0]
+            df_debito_al_corte['file_name'] = df_debito_al_corte['file_name'].str.split('__HASH__').str[0]
             
             # NUEVA LÍNEA: Quitar también la extensión .csv
-            df_debito_al_corte['file_name_clean'] = df_debito_al_corte['file_name_clean'].str.replace('.csv', '', regex=False)
+            df_debito_al_corte['file_name'] = df_debito_al_corte['file_name'].str.replace('.csv', '', regex=False)
             
             # Convertir fechas de corte a datetime y truncar al mes
             df_fechas_de_corte['fecha_corte_dt'] = pd.to_datetime(
@@ -322,7 +322,7 @@ class BankingManager:
             # 2) ✅ NUEVO: Verificar archivos esperados CON Y SIN sufijo
             expected_files_with_suffix = [f"{current_period}_debit", f"{previous_period}_debit"]
             expected_files_without_suffix = [f"{current_period}", f"{previous_period}"]
-            existing_files = df_debito_al_corte['file_name_clean'].unique()
+            existing_files = df_debito_al_corte['file_name'].unique()
             
             print(f"   📋 Archivos esperados (con sufijo): {expected_files_with_suffix}")
             print(f"   📋 Archivos esperados (sin sufijo): {expected_files_without_suffix}")
