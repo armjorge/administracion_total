@@ -19,8 +19,8 @@ class BankingManager:
         self.folder_root = folder_root
         
         # Configurar rutas
-        self.download_folder = os.path.join(working_folder, "Temporal Downloads")
-        self.path_tc_closed = os.path.join(self.working_folder, 'Meses cerrados')
+        self.download_folder = os.path.join(self.working_folder, "Temporal Downloads")
+        #self.path_tc_closed = os.path.join(self.working_folder, 'Meses cerrados')
         
         # Crear directorios necesarios
         create_directory_if_not_exists([
@@ -32,8 +32,9 @@ class BankingManager:
         self.file_processor = FileProcessor(working_folder, data_access) 
         self.web_automation = WebAutomation(self.download_folder, folder_root) #Aquí le dices dónde descargar. 
         self.sheets_updater = SheetsUpdater(working_folder, data_access)
-        self.sql_operations = SQL_Operations(data_access)
-        
+        #self.sql_operations = SQL_Operations(data_access)
+        #self.sql_integration.update_sql(df_to_upload, schema, table_name)
+        #self.sql_integration.run_queries(queries_folder, schema, table_name)
     
     def run_banking_menu(self):
         """Ejecuta el menú principal del sistema bancario"""
@@ -41,9 +42,9 @@ class BankingManager:
         while True:
             choice = input(f"""{message_print('¿Qué deseas hacer?')}
         1. Descargar, renombrar y mover archivos CSV corrientes
-        2. Exportar CSV's a local y cargar a google sheets
+        2. Exportar CSV's a local, cargar a google sheets y a SQL. 
         3. Procesar archivos CSV al mes corte
-        4. Conectar a la base de datos SQL
+        4. Datawarehouse 
         0. Salir
         Elige una opción: """)
 
@@ -54,10 +55,10 @@ class BankingManager:
             elif choice == "3":
                 self._process_monthly_cut_files()
                 self.process_closed_credit_accounts()
+                self._upload_to_sql()
             elif choice == "4":
-                # Llamar a la función para conectar a la base de datos
-                self.sql_operations.sql_business_mining()
-                self.sql_operations.sql_menu()
+                # Cargar información a las bases de datos:
+
             elif choice == "0":
                 print("👋 ¡Hasta luego!")
                 return
@@ -189,7 +190,7 @@ class BankingManager:
                 df_fechas_de_corte = pickle.load(f)
             
             # Cargar DataFrame de crédito al corte
-            credit_file = os.path.join(cut_folder, "pickle_credit_closed.pkl")
+            credit_file = self.pickle_credit_closed #os.path.join(cut_folder, "pickle_credit_closed.pkl")
             with open(credit_file, 'rb') as f:
                 df_credito_al_corte = pickle.load(f)
             
@@ -211,8 +212,9 @@ class BankingManager:
             today = date.today()
             year = today.year
             month = today.month
-            
-            current_period = pd.Period(f"{year}-{month:02d}", freq='M')
+
+            # Calcular el periodo actual (mes cerrado más reciente)
+            current_period = pd.Period(f"{year}-{month:02d}", freq='M') - 1
             previous_period = current_period - 1
             
             print(f"   📅 Verificando archivos para: {current_period} y {previous_period}")
@@ -287,7 +289,7 @@ class BankingManager:
 
 
             # Cargar DataFrame de débito al corte
-            debit_file = os.path.join(cut_folder, "pickle_debit_closed.pkl")
+            debit_file = self.pickle_debit_closed
             with open(debit_file, 'rb') as f:
                 df_debito_al_corte = pickle.load(f)
             
@@ -458,7 +460,7 @@ class BankingManager:
         }
         
         for pickle_filename, description in pickle_files.items():
-            pickle_path = os.path.join(cut_folder, pickle_filename)
+            pickle_path = pickle_filename
             
             if os.path.exists(pickle_path):
                 try:
@@ -549,7 +551,7 @@ class BankingManager:
         print(f"\n📂 Cargando DataFrames existentes...")
         
         # Cargar crédito
-        credit_path = os.path.join(self.path_tc_closed, 'pickle_credit_closed.pkl')
+        credit_path = self.pickle_credit_closed
         if os.path.exists(credit_path):
             with open(credit_path, 'rb') as f:
                 df_credit = pickle.load(f)
@@ -559,7 +561,7 @@ class BankingManager:
             print(f"   ⚠️ Archivo de crédito no existe, creando DataFrame vacío")
         
         # Cargar débito
-        debit_path = os.path.join(self.path_tc_closed, 'pickle_debit_closed.pkl')
+        debit_path = self.pickle_debit_closed
         if os.path.exists(debit_path):
             with open(debit_path, 'rb') as f:
                 df_debit = pickle.load(f)
@@ -693,13 +695,13 @@ class BankingManager:
         print(f"\n💾 Guardando DataFrames actualizados...")
         
         # Guardar crédito
-        credit_path = os.path.join(self.path_tc_closed, 'pickle_credit_closed.pkl')
+        credit_path = self.pickle_credit_closed #os.path.join(self.path_tc_closed, 'pickle_credit_closed.pkl')
         with open(credit_path, 'wb') as f:
             pickle.dump(df_credit, f)
         print(f"   ✅ Crédito guardado: {df_credit.shape[0]} registros")
         
         # Guardar débito
-        debit_path = os.path.join(self.path_tc_closed, 'pickle_debit_closed.pkl')
+        debit_path  = self.pickle_debit_closed #os.path.join(self.path_tc_closed, 'pickle_debit_closed.pkl')
         with open(debit_path, 'wb') as f:
             pickle.dump(df_debit, f)
         print(f"   ✅ Débito guardado: {df_debit.shape[0]} registros")
@@ -767,16 +769,16 @@ class BankingManager:
             print(f"   ❌ Error exportando a Excel: {e}")
 
         if 'credit' in dataframes_dict and dataframes_dict['credit'] is not None:
-            with open(os.path.join(self.path_tc_closed, 'credit_current.pkl'), 'wb') as f:
+            with open(self.pickle_credito_corriente, 'wb') as f:
                 pickle.dump(dataframes_dict['credit'], f)
             print(f"   💾 credit → credit_current.pkl")
         
         if 'debit' in dataframes_dict and dataframes_dict['debit'] is not None:
-            with open(os.path.join(self.path_tc_closed, 'debit_current.pkl'), 'wb') as f:
+            with open(self.pickle_debito_corriente, 'wb') as f:
                 pickle.dump(dataframes_dict['debit'], f)
             print(f"   💾 debit → debit_current.pkl")
                         
-    def _fix_date_format(self, dataframes_dict):
+    def _fix_date_format(self, dataframes_dict):  
         """Convierte columnas 'Fecha' de string a datetime en todos los DataFrames"""
         print(f"\n📅 Normalizando fechas...")
         
@@ -790,3 +792,7 @@ class BankingManager:
                     print(f"   ✅ {key}: Fecha ya en formato datetime")
         
         return dataframes_dict
+    def _upload_to_sql(self):
+        """Carga un DataFrame a la base de datos SQL"""
+        df_to_upload = 
+        self.sql_integration.update_sql(df_to_upload, schema, table_name)
