@@ -16,12 +16,11 @@ class DownloaderWorkflow:
         self.pickle_credito_cerrado = pickle_credito_cerrado
         self.folder_temporal_al_corte = os.path.join(self.path_tc_closed, "Descargas temporales")
         self.web_automation = WebAutomation(self.data_access)
-    def periodos_credito_cerrado(self):
-        today_period = pd.to_datetime(self.today).to_period('M')
-        current_period_credit = today_period
-        previous_period_credit = current_period_credit - 1
+    def gestor_de_credito_al_mes(self, expected_files):
+        # Convertir el periodo actual a string
+        today_period = str(pd.to_datetime(self.today).to_period('M'))
 
-        # Implementación de la función para manejar los períodos de crédito cerrado
+        # Cargar y procesar las fechas de corte
         fechas_corte_credito = self.helper.load_pickle_as_dataframe(self.fechas_corte)
         fechas_corte_credito['FECHA CORTE'] = pd.to_datetime(
             fechas_corte_credito['Fecha corte dd-mm-yyyy'],
@@ -32,46 +31,74 @@ class DownloaderWorkflow:
             fechas_corte_credito['FECHA CORTE'], 
             errors='coerce'
         )
-        # Filtrar filas donde el año y mes de 'FECHA CORTE' coincidan con self.today
+        # Filtrar filas donde el año y mes de 'FECHA CORTE' coincidan con el periodo actual
         fechas_corte_credito['period'] = fechas_corte_credito['FECHA CORTE'].dt.to_period('M')
         fechas_corte_credito_filtrado = fechas_corte_credito[fechas_corte_credito['period'] == today_period]
-        # Check if there are any valid datetime values in the column
-
+        # Eliminar 'credito_cerrado' de la lista asociada a today_period si la fecha de corte es mayor a la fecha actual        # Si no hay fechas válidas en 'FECHA CORTE'
         if not fechas_corte_credito_filtrado['FECHA CORTE'].notna().any():
             print("⚠️ La columna 'FECHA CORTE' no contiene valores válidos de fecha.")
             print("Función para actualizar una nueva fecha")
-            return
+            while True:
+                try:
+                    user_input = int(input("Escribe 1 si ya pasó la fecha de corte, 2 si no ha pasado: "))
+                    if user_input == 1:
+                        return expected_files  # Devuelve el diccionario actualizado
+                    elif user_input == 2:
+                        return expected_files  # Devuelve el diccionario original
+                    else:
+                        print("Entrada no válida. Por favor, escribe 1 o 2.")
+                except ValueError:
+                    print("Entrada no válida. Por favor, escribe un número (1 o 2).")
         else:
+            # Si hay fechas válidas, verifica si la fecha de corte es mayor a la fecha actual
             print(f"La fecha de corte crédito existe, procedemos a revisar si {fechas_corte_credito_filtrado['Fecha corte dd-mm-yyyy'].values[0]} es mayor a {self.today}")
             print(f"Ruta de fechas de corte: {fechas_corte_credito_filtrado.head()}")
+
+        # Comparar la fecha actual con la primera fecha de corte válida
         if pd.Timestamp(self.today) < fechas_corte_credito_filtrado['FECHA CORTE'].values[0]:
-            expected_credit = [str(previous_period_credit)]
-            return expected_credit
+            return expected_files[today_period].remove('credito_cerrado')  # Devuelve el diccionario actualizado
         else:
-            expected_credit = [str(current_period_credit), str(previous_period_credit)]
-            return expected_credit
+            return expected_files  # Devuelve el diccionario original
+    def confirmar_si_existen(self, expected_files): 
+        """expected_files = 
+        Periodo: 2025-08, Archivos esperados: ['credito_corriente', 'credito_cerrado', 'debito_corriente']
+        Periodo: 2025-07, Archivos esperados: ['credito_cerrado', 'debito_cerrado']
+        Periodo: 2025-06, Archivos esperados: ['debito_cerrado']
+        """
+        for key, value in expected_files.items():  # key es el periodo, value es la lista de archivos esperados
+            print(f"Periodo: {key}, Archivos esperados: {value}")
+            for item in value:  # Iterar sobre la lista de archivos esperados
+                if item == 'credito_cerrado':
+                    print(f"Procesando 'credito_cerrado' para el periodo {key}")
+                    # Lógica para 'credito_cerrado'
+                elif item == 'credito_corriente': 
+                    print(f"Procesando 'credito_corriente' para el periodo {key}")
+                    # Lógica para 'credito_corriente'
+                elif item == 'debito_corriente':
+                    print(f"Procesando 'debito_corriente' para el periodo {key}")
+                    # Lógica para 'debito_corriente'
+                elif item == 'debito_cerrado':
+                    print(f"Procesando 'debito_cerrado' para el periodo {key}")
+                    # Lógica para 'debito_cerrado'
+                else:
+                    print(f"⚠️ Tipo de archivo desconocido: {item}")
 
     def descargador_workflow(self):
         print(self.helper.message_print("Bienvenido al menú bancario"))
         # Archivos esperados débito
-        today_period = pd.to_datetime(self.today).to_period('M')
-        current_period = today_period - 1
-        previous_period = current_period - 1
-        expected_debit = [str(current_period), str(previous_period)]
-        print(f"Periodo esperado para débito: {expected_debit}")
-        # Archivos eseperados crédito        
-        fechas_corte_credito = self.periodos_credito_cerrado()
-        print(f"Periodo esperado para crédito: {fechas_corte_credito}")
-        print(f"Fecha de hoy: {self.today}")
-        # expected_debit: lista con dos veces el periodo anterior como string (ej: ['2024-05', '2024-05'])
-        df_credito_cerrado = self.helper.load_pickle_as_dataframe(self.pickle_credito_cerrado)
-        df_debito_cerrado = self.helper.load_pickle_as_dataframe(self.pickle_debito_cerrado)
-        archivos_credito_cerrado = self.check_expected_file(fechas_corte_credito, df_credito_cerrado)
-        archivos_debito_cerrado = self.check_expected_file(expected_debit, df_debito_cerrado)    
-        files_to_download = {'credito_columns': archivos_credito_cerrado, 'debito_columns': archivos_debito_cerrado}
-        print(f"Archivos faltantes: {files_to_download}")
-        if files_to_download:  # Check if the dictionary is not empty
-            self.download_missing_files(files_to_download)
+        today_period = str(pd.to_datetime(self.today).to_period('M'))  # Convertir a string
+        previous_period = str((pd.to_datetime(self.today).to_period('M') - 1))  # 1 mes atrás
+        two_previous_period = str((pd.to_datetime(self.today).to_period('M') - 2))  # 2 meses atrás
+
+        expected_files = {
+            today_period: ['credito_corriente', 'credito_cerrado', 'debito_corriente'],
+            previous_period: ['credito_cerrado', 'debito_cerrado'],
+            two_previous_period: ['debito_cerrado']
+        }        # Retirar credito cerrado de today_period si tenemos la fecha de corte
+        expected_files =  self.gestor_de_credito_al_mes(expected_files)
+        for key, value in expected_files.items():
+            print(f"Periodo: {key}, Archivos esperados: {value}")
+        expected_files = self.confirmar_si_existen(expected_files)
 
     def download_missing_files(self, files_to_download):
         # Process missing files
@@ -83,7 +110,7 @@ class DownloaderWorkflow:
                         grouped_missing_files[date] = []  # Initialize an empty list for the date
                     grouped_missing_files[date].append(key)  # Add the column type (e.g., 'credito_columns')
         # prueba
-        grouped_missing_files = {'2025-08': ['credito_columns'], '2025-07': ['credito_columns', 'debito_columns']}
+        grouped_missing_files = {'2025-08': ['credito_columns', 'debito_columns'], '2025-07': ['credito_columns', 'debito_columns']}
         # Print grouped missing files
         print(grouped_missing_files)
         for date, columns in grouped_missing_files.items():
