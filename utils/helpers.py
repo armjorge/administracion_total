@@ -71,6 +71,13 @@ class Helper:
             return None
     @staticmethod
     def get_files_in_directory(directory):
+        """
+        Busca archivos en un directorio dado.
+        """
+        if not isinstance(directory, (str, bytes, os.PathLike)):
+            raise TypeError(f"El argumento 'directory' debe ser un string, bytes, o PathLike, pero se recibió: {type(directory)}")
+        
+        print(f"Buscando archivos en el directorio {directory}")
         return [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
     @staticmethod
     def get_file_headers(file_path):
@@ -81,23 +88,56 @@ class Helper:
         except Exception as e:
             print(f"Error al leer el archivo {file_path}: {e}")
             return []
-    @staticmethod  
+    @staticmethod
     def merge_files(file_paths):
+        """
+        Fusiona múltiples archivos CSV en uno solo o devuelve el archivo si solo hay uno.
+        Lanza un error si no se proporciona ningún archivo.
+        """
         import pandas as pd
+        import os
+
         try:
+            # Validar que se proporcionen archivos
+            if not file_paths or len(file_paths) == 0:
+                raise ValueError("No se proporcionaron archivos para fusionar.")
+
+            # Si solo hay un archivo, devolverlo directamente
+            if len(file_paths) == 1:
+                print(f"⚠️ Solo se proporcionó un archivo. No se realizará la fusión: {file_paths[0]}")
+                return file_paths[0]
+
+            # Fusionar múltiples archivos
             dfs = [pd.read_csv(file) for file in file_paths]
             merged_df = pd.concat(dfs, ignore_index=True)
             merged_file_path = os.path.join(os.path.dirname(file_paths[0]), "merged_file.csv")
             merged_df.to_csv(merged_file_path, index=False)
+            print(f"✅ Archivos fusionados correctamente en: {merged_file_path}")
             return merged_file_path
+
         except Exception as e:
-            print(f"Error al fusionar archivos: {e}")
+            print(f"❌ Error al fusionar archivos: {e}")
             return None
     @staticmethod
     def move_file(source, destination):
+        """
+        Mueve un archivo de una ubicación a otra.
+        """
         import shutil
         try:
             shutil.move(source, destination)
-            print(f"Archivo movido de {source} a {destination}")
+            print(f"✅ Archivo movido de {source} a {destination}")
         except Exception as e:
-            print(f"Error al mover el archivo {source}: {e}")
+            print(f"❌ Error al mover el archivo {source}: {e}")
+    @staticmethod
+    def archivo_corriente_reciente(fecha, suffix, type):
+        """
+        Genera un path dinámico válido basado en la fecha y el sufijo.
+        """
+        formatted_today = fecha.strftime('%Y-%m-%d')
+        periodo = fecha.strftime('%Y-%m')
+        if type == 'cerrado': 
+            path_dinamico = os.path.join(f"{periodo}{suffix}")
+        elif type == 'corriente':
+            path_dinamico = os.path.join(f"{periodo}",f"{formatted_today}{suffix}")
+        return path_dinamico

@@ -35,7 +35,7 @@ class TotalManagementApp:
         self.pickle_credito_corriente = os.path.join(self.path_tc_closed, 'credit_current.pkl')
         self.pickle_credit_closed = os.path.join(self.path_tc_closed, 'pickle_credit_closed.pkl')
         self.pickle_debit_closed = os.path.join(self.path_tc_closed, 'pickle_debit_closed.pkl')
-        self.download_folder = os.path.join(self.working_folder, "Temporal Downloads")
+        self.corriente_temporal_downloads = os.path.join(self.working_folder, "Temporal Downloads")
         self.fechas_corte = os.path.join(self.path_tc_closed, "df_fechas_corte_2025.pkl")
         self.TODAY = date.today()
         self.banking_manager = None
@@ -48,6 +48,7 @@ class TotalManagementApp:
             self.data_access,
             self.folder_root,
             self.path_tc_closed,
+            self.corriente_temporal_downloads,
             self.fechas_corte,
             self.TODAY,
             self.pickle_debito_corriente,
