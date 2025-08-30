@@ -545,7 +545,6 @@ class BankingManager:
         # 5. Guardar DataFrames actualizados
         self._save_updated_pickles(df_credit, df_debit)
         
-    
     def _load_existing_pickles(self):
         """Carga los DataFrames existentes de crédito y débito"""
         print(f"\n📂 Cargando DataFrames existentes...")
@@ -792,6 +791,7 @@ class BankingManager:
                     print(f"   ✅ {key}: Fecha ya en formato datetime")
         
         return dataframes_dict
+
     def _upload_to_sql(self):
         """Carga un DataFrame a la base de datos SQL"""
         df_to_upload = 
