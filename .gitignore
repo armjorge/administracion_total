@@ -4,3 +4,5 @@ modulos_git/Implementación/
 Info Bancaria/
 __pycache__/
 .ipynb_checkpoints/
+.DS_Store
+.vscode/
