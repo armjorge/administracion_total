@@ -15,8 +15,9 @@ class DownloaderWorkflow:
         self.helper = Helper()
         self.pickle_debito_cerrado = pickle_debito_cerrado
         self.pickle_credito_cerrado = pickle_credito_cerrado
-        self.folder_al_corte_descargas_corrientes = os.path.join(self.path_tc_closed, "Descargas temporales")
-        self.folder_al_corte_descargas_cerradas = os.path.join(self.working_folder, "Temporal Downloads")
+        self.folder_al_corte_descargas_corrientes = os.path.join(self.working_folder, "Descargas temporales")
+        self.folder_al_corte_descargas_cerradas = os.path.join(self.path_tc_closed, "Temporal Downloads")
+        print(f"Directorio de descargas cerradas: {self.folder_al_corte_descargas_cerradas}")
         self.web_automation = WebAutomation(self.data_access, self.today, self.path_tc_closed, self.working_folder)
     def gestor_de_credito_al_mes(self, expected_files):
         # Convertir el periodo actual a string
@@ -92,8 +93,9 @@ class DownloaderWorkflow:
                         print(f"⚠️ No se encontraron archivos para el patrón '{key}' en el DataFrame.")
                 elif item == 'credito_corriente': 
                     print(f"Procesando 'credito_corriente' para el periodo {key}")
-                    suffix = '_credit.csv'
+                    suffix = '_credito'
                     archivo_credito, fecha = self.get_newest_file(key, suffix)
+                    print("\nBuscando archivos de crédito corriente en:", archivo_credito, "\n")
                     if os.path.exists(archivo_credito): 
                         print(f"✅ Archivo de hoy {fecha} encontrado: {archivo_credito}")
                         if 'credito_corriente' in expected_files[key]:  # Check if the item exists before removing
@@ -102,7 +104,7 @@ class DownloaderWorkflow:
                         print(f"⚠️ No se encontró archivo de hoy {fecha} reciente para {suffix}.")
 
                 elif item == 'debito_corriente':
-                    suffix = '_debit.csv'
+                    suffix = '_debito'
                     archivo_debito, fecha = self.get_newest_file(key, suffix)
                     print(f"Procesando 'debito_corriente' para el periodo {key}")
                     if os.path.exists(archivo_debito):
@@ -146,39 +148,49 @@ class DownloaderWorkflow:
         expected_files = self.confirmar_si_existen(expected_files)
         for key, value in expected_files.items():
             print(f"Periodo: {key}, Archivos esperados: {value}")
+        expected_files = {key: value for key, value in expected_files.items() if value}
         self.download_missing_files(expected_files)
     
     def download_missing_files(self, files_to_download):
+        print(f"download_missing_files Directorio de descargas para archivos cerrados: {self.folder_al_corte_descargas_cerradas}")
+        print("Función download_missing_files: le pasa la lista de archivos que se requieren")
+        print("Parámetro files_to_download:")
+        print(files_to_download)
         for periodo, tipo_archivos in files_to_download.items():
+            print(f"\nProcesando archivos faltantes para el periodo {periodo}...")
+
+            # Si hay archivos cerrados en la lista
             if 'credito_cerrado' in tipo_archivos or 'debito_cerrado' in tipo_archivos:
-                print(f"Tenemos archivos que procesar del periodo {periodo}.")
+                print(f"Archivos cerrados detectados en el periodo {periodo}: {tipo_archivos}")
 
-                # Remover 'credito_cerrado' si no está mencionado
-                if not 'credito_cerrado' in tipo_archivos:
-                    print("Removiendo 'credito_cerrado'..., no es necesario")
-                    # Aquí puedes agregar la lógica para verificar si 'credito_cerrado' debe ser eliminado
-                    tipo_archivos.remove('credito_cerrado')  # Remover si es necesario
+                # 1. Eliminar los archivos que terminen con '_corriente' de la lista
+                tipo_archivos = [archivo for archivo in tipo_archivos if not archivo.endswith('_corriente')]
+                print(f"Lista después de eliminar archivos '_corriente': {tipo_archivos}")
 
-                # Remover 'debito_cerrado' si no está mencionado
-                if not 'debito_cerrado' in tipo_archivos:
-                    print("Removiendo 'debito_cerrado'..., no es necesario")
-                    # Aquí puedes agregar la lógica para verificar si 'debito_cerrado' debe ser eliminado
-                    tipo_archivos.remove('debito_cerrado')  # Remover si es necesario
+                # 2. Detectar cuál de los dos (credito_cerrado o debito_cerrado) está presente
+                archivos_faltantes_cerrado = []
+                if 'credito_cerrado' in tipo_archivos:
+                    archivos_faltantes_cerrado.append('credito_cerrado')
+                if 'debito_cerrado' in tipo_archivos:
+                    archivos_faltantes_cerrado.append('debito_cerrado')
 
-                archivos_faltantes_cerrado = tipo_archivos  # Actualizar la lista de archivos faltantes
-                print(f"Archivos faltantes actualizados: {archivos_faltantes_cerrado}")
-                print(self.utils.message_print(f"Vamos a descargar archivos cerrados de {archivos_faltantes_cerrado}, estos son fijos y corresponden al periodo {periodo}"))
-                if archivos_faltantes_cerrado: 
-                    self.web_automation.execute_download_session(self.folder_al_corte_descargas_cerradas, archivos_faltantes_cerrado, periodo)
+                print(f"Archivos faltantes cerrados para el periodo {periodo}: {archivos_faltantes_cerrado}")
+
+                # 3. Si la lista tiene elementos, ejecutar la descarga
+                if archivos_faltantes_cerrado:
+                    print(f"Ejecutando descarga para archivos cerrados: {archivos_faltantes_cerrado}")
+                    self.web_automation.execute_download_session(
+                        self.folder_al_corte_descargas_cerradas, archivos_faltantes_cerrado, periodo
+                    )
 
             elif 'credito_corriente' in tipo_archivos or 'debito_corriente' in tipo_archivos:
-                # Remover 'credito_cerrado' si no está mencionado
+                # Remover 'credito_corriente' si no está mencionado
                 if not 'credito_corriente' in tipo_archivos:
                     print("Removiendo 'credito_corriente'..., no es necesario")
                     # Aquí puedes agregar la lógica para verificar si 'credito_corriente' debe ser eliminado
                     tipo_archivos.remove('credito_corriente')  # Remover si es necesario
 
-                # Remover 'debito_cerrado' si no está mencionado
+                # Remover 'debito_corriente' si no está mencionado
                 if not 'debito_corriente' in tipo_archivos:
                     print("Removiendo 'debito_corriente'..., no es necesario")
                     # Aquí puedes agregar la lógica para verificar si 'debito_corriente' debe ser eliminado

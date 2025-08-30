@@ -48,20 +48,24 @@ class SQL_CONNEXION_UPDATING:
             connexion = self.sql_conexion()
             if connexion is None:
                 return False
-            # Create schema if it doesn't exist
+
+            # Verificar o crear el esquema
             if not self.create_schema_if_not_exists(connexion, schema):
-                print(f"⚠️ Could not create schema '{schema}', using default schema")
-                schema = None
-            
+                print(f"⚠️ Could not create schema '{schema}', but it might already exist. Proceeding with the provided schema.")
+
+            # Asegúrate de que el esquema se use correctamente
+            schema = schema.lower()  # Convertir a minúsculas para evitar problemas de mayúsculas/minúsculas
+
+            # Subir el DataFrame a la tabla en el esquema especificado
             df_to_upload.to_sql(table_name, con=connexion, schema=schema, if_exists='replace', index=False)
-            
-            schema_display = schema if schema else "default"
-            print(f"✅ Successfully uploaded {len(df_to_upload)} rows to {schema_display}.{table_name}")
+
+            print(f"✅ Successfully uploaded {len(df_to_upload)} rows to {schema}.{table_name}")
             return True
-            
+
         except Exception as e:
             print(f"❌ Error updating SQL: {e}")
             return False
+
         finally:
             if connexion:
                 connexion.dispose()

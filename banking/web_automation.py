@@ -78,40 +78,45 @@ class WebAutomation:
             print(f"Failed to initialize Chrome driver: {e}")
             return None
     
-    def execute_download_session(self, download_folder, archivos_faltantes, periodo) :
+    def execute_download_session(self, download_folder, archivos_faltantes, periodo):
         """Ejecuta una sesión completa de descarga"""
+        print(f"Path del directorio de descargas en execute_download_session: {download_folder}")
         if not self.chrome_driver_load:
             print("❌ Driver de Chrome no disponible")
             return False
-        result = False
-        while not result:        
-            try:
-                # Inicializar driver
-                self.driver = self.chrome_driver_load(download_folder)
-                
-                # Configurar acciones según los datos de acceso
-                actions = self._build_actions(self.data_access)
-                
-                # Ejecutar navegación
-                success = self._execute_navigation(actions)
-                # Continuar con el código después de que file_routing sea True
+
+        try:
+            # Inicializar driver
+            self.driver = self.chrome_driver_load(download_folder)
+
+            # Configurar acciones según los datos de acceso
+            actions = self._build_actions(self.data_access)
+
+            # Ejecutar navegación
+            success = self._execute_navigation(actions)
+            if success:
+                print("✅ Navegación completada con éxito. Procediendo a procesar archivos...")
+
+                # Ejecutar file_routing después de la navegación
                 result = self.file_routing(download_folder, archivos_faltantes, periodo)
                 if result:
                     print("✅ Descarga y organización de archivos completada con éxito.")
-                    break
+                    return True
+                else:
+                    print("❌ No se pudieron procesar los archivos.")
+                    return False
+        except Exception as e:
+            print(f"❌ Error durante la automatización: {e}")
+            return False
 
-            except Exception as e:
-                print(f"❌ Error durante la automatización: {e}")
-                return False
-            finally:
-                if self.driver:
-                    input(Helper.message_print("Presiona enter para cerrar el navegador"))
-                    self.driver.quit()
+        finally:
+            if self.driver:
+                input(Helper.message_print("Presiona enter para cerrar el navegador"))
+                self.driver.quit()
 
-        
-            
+                
     def file_routing(self, download_folder, archivos_faltantes, periodo):
-        print(f"Valor de 'download_folder': {download_folder}")
+        print(f"Buscando archivos en el directorio: {download_folder}")
 
         """Gestiona la ruta de los archivos descargados"""
         expected_headers_credito = self.data_access['BANORTE_credit_headers']
@@ -141,22 +146,45 @@ class WebAutomation:
             suffix = '_credito.csv'
             partial_path = self.helper.archivo_corriente_reciente(self.today, suffix, 'corriente')
             paths_destino['credito_corriente'] = partial_path
+        if 'debito_cerrado' in archivos_faltantes:
+            suffix = '_debito.csv'
+            partial_path = self.helper.archivo_corriente_reciente(periodo, suffix, 'cerrado')
+            paths_destino['debito_cerrado'] = partial_path
+        if 'credito_cerrado' in archivos_faltantes:
+            suffix = '_credito.csv'
+            partial_path = self.helper.archivo_corriente_reciente(periodo, suffix, 'cerrado')
+            paths_destino['credito_cerrado'] = partial_path
 
-        # Imprimir las rutas generadas
-        print(f"Buscaremos archivos csv en la carpeta {download_folder}")
-        csv_files = self.helper.get_files_in_directory(download_folder)
-        print(f"Archivos encontrados: {csv_files}")
+        # Loop para reintentar hasta que los archivos sean encontrados
+        max_retries = 5
+        retries = 0
+        while retries < max_retries:
+            print(f"🔄 Intento {retries + 1} de {max_retries} para encontrar archivos...")
+            csv_files = self.helper.get_files_in_directory(download_folder)  # Asegúrate de usar download_folder aquí
+            print(f"Archivos encontrados: {csv_files}")
 
-        # Filtrar archivos por headers
-        csv_files_credit = [f for f in csv_files if self.helper.get_file_headers(os.path.join(download_folder, f)) == expected_headers_credito]
-        csv_files_debito = [f for f in csv_files if self.helper.get_file_headers(os.path.join(download_folder, f)) == expected_headers_debito]
+            # Filtrar archivos por headers
+            csv_files_credit = [f for f in csv_files if self.helper.get_file_headers(os.path.join(download_folder, f)) == expected_headers_credito]
+            csv_files_debito = [f for f in csv_files if self.helper.get_file_headers(os.path.join(download_folder, f)) == expected_headers_debito]
 
-        print(f"Archivos de crédito encontrados: {csv_files_credit}")
-        print(f"Archivos de débito encontrados: {csv_files_debito}")
+            print(f"Archivos de crédito encontrados: {csv_files_credit}")
+            print(f"Archivos de débito encontrados: {csv_files_debito}")
 
+            if csv_files_credit or csv_files_debito:
+                break  # Salir del loop si se encuentran archivos
+            else:
+                print("⚠️ No se encontraron archivos válidos. Esperando antes de reintentar...")
+                retries += 1
+                import time
+                time.sleep(10)  # Esperar 10 segundos antes de reintentar
+
+        if retries == max_retries:
+            print("❌ No se encontraron archivos después de varios intentos.")
+            return False
+
+        # Procesar archivos encontrados
         for key, path in paths_destino.items():
-            if key == 'debito_corriente':
-                # Fusionar archivos CSV de débito
+            if key == 'debito_corriente' and csv_files_debito:
                 print(f"🔄 Fusionando archivos de débito para {key}...")
                 merged_file = self.helper.merge_files([os.path.join(download_folder, f) for f in csv_files_debito])
                 if merged_file:
@@ -164,15 +192,14 @@ class WebAutomation:
                     self.helper.move_file(merged_file, destination_path)
                     print(f"✅ Archivo fusionado de débito movido a: {destination_path}")
                     for file in csv_files_debito:
-                        os.remove(os.path.join(download_folder, file))
-                        print(f"🗑️ Archivo eliminado: {file}")
-                    return True
-                else:
-                    print(f"❌ No se pudo fusionar los archivos de débito para {key}.")
-                    continue
+                        file_path = os.path.join(download_folder, file)
+                        if os.path.exists(file_path):  # Verificar si el archivo aún existe
+                            os.remove(file_path)
+                            print(f"🗑️ Archivo eliminado: {file}")
+                        else:
+                            print(f"⚠️ Archivo ya no existe y no se puede eliminar: {file}")
 
-            elif key == 'credito_corriente':
-                # Fusionar archivos CSV de crédito
+            elif key == 'credito_corriente' and csv_files_credit:
                 print(f"🔄 Fusionando archivos de crédito para {key}...")
                 merged_file = self.helper.merge_files([os.path.join(download_folder, f) for f in csv_files_credit])
                 if merged_file:
@@ -180,12 +207,45 @@ class WebAutomation:
                     self.helper.move_file(merged_file, destination_path)
                     print(f"✅ Archivo fusionado de crédito movido a: {destination_path}")
                     for file in csv_files_credit:
-                        os.remove(os.path.join(download_folder, file))
-                        print(f"🗑️ Archivo eliminado: {file}")
-                    return True
-                else:
-                    print(f"❌ No se pudo fusionar los archivos de crédito para {key}.")
-                    continue
+                        file_path = os.path.join(download_folder, file)
+                        if os.path.exists(file_path):  # Verificar si el archivo aún existe
+                            os.remove(file_path)
+                            print(f"🗑️ Archivo eliminado: {file}")
+                        else:
+                            print(f"⚠️ Archivo ya no existe y no se puede eliminar: {file}")
+            elif key == 'debito_cerrado' and csv_files_debito:
+                print(f"🔄 Fusionando archivos de débito para {key}...")
+                merged_file = self.helper.merge_files([os.path.join(download_folder, f) for f in csv_files_debito])
+                if merged_file:
+                    destination_path = os.path.join(self.path_tc_closed, "Repositorio por mes")
+                    self.helper.create_directory_if_not_exists(destination_path)
+                    destination_file_path = os.path.join(destination_path, path)
+                    self.helper.move_file(merged_file, destination_file_path)
+                    print(f"✅ Archivo fusionado de débito movido a: {destination_file_path}")
+                    for file in csv_files_debito:
+                        file_path = os.path.join(download_folder, file)
+                        if os.path.exists(file_path):  # Verificar si el archivo aún existe
+                            os.remove(file_path)
+                            print(f"🗑️ Archivo eliminado: {file}")
+                        else:
+                            print(f"⚠️ Archivo ya no existe y no se puede eliminar: {file}")
+            elif key == 'credito_cerrado' and csv_files_credit:
+                print(f"🔄 Fusionando archivos de crédito para {key}...")
+                merged_file = self.helper.merge_files([os.path.join(download_folder, f) for f in csv_files_credit])
+                if merged_file:
+                    destination_path = os.path.join(self.path_tc_closed, "Repositorio por mes")
+                    self.helper.create_directory_if_not_exists(destination_path)
+                    destination_file_path = os.path.join(destination_path, path)
+                    self.helper.move_file(merged_file, destination_file_path)
+                    print(f"✅ Archivo fusionado de crédito movido a: {destination_file_path}")
+                    for file in csv_files_credit:
+                        file_path = os.path.join(download_folder, file)
+                        if os.path.exists(file_path):  # Verificar si el archivo aún existe
+                            os.remove(file_path)
+                            print(f"🗑️ Archivo eliminado: {file}")
+                        else:
+                            print(f"⚠️ Archivo ya no existe y no se puede eliminar: {file}")
+        return True
 
     def _build_actions(self, data_access):
         """Construye las acciones con las credenciales del usuario"""
@@ -216,7 +276,12 @@ class WebAutomation:
                     "type": "click", 
                     "by": By.XPATH, 
                     "locator": '//*[@id="btnAceptarloginPasswordAsync"]'
-                }
+                },
+                #{
+                #    "type": "call_function",  # Nueva acción personalizada
+                #    "function": self.file_routing,  # Referencia a la función
+                #    "args": [self.working_folder, data_access.get("archivos_faltantes", []), data_access.get("periodo", "")]
+                #}
             ]
         }
         return actions
@@ -226,17 +291,20 @@ class WebAutomation:
         for url, steps in actions.items():
             print(f"\n🔗 Navegando a {url}")
             self.driver.get(url)
-            
             try:
                 for idx, step in enumerate(steps, start=1):
                     success = self._execute_step(step, idx)
                     if not success:
-                        return False
-                        
+                        if step["type"] == "call_function":
+                            print("⚠️ Reintentando la función personalizada...")
+                            continue  # Reintentar la función personalizada
+                        else:
+                            return False
+                            
             except TimeoutException as e:
                 print(f"❌ Timeout durante la navegación: {e}")
                 return False
-        
+            
         return True
     
     def _execute_step(self, step, step_number):
@@ -249,7 +317,26 @@ class WebAutomation:
             print(f"\n    ⏸ {msg}")
             input()
             return True
-        
+        # Paso para llamar a la función. 
+        elif step_type == "call_function":
+            # Llamar a una función personalizada
+            function = step.get("function")
+            args = step.get("args", [])
+            kwargs = step.get("kwargs", {})
+            print(f"  → Llamando a la función: {function.__name__}")
+            try:
+                result = function(*args, **kwargs)
+                if result:
+                    print(f"    ✓ Función {function.__name__} ejecutada con éxito.")
+                    return True
+                else:
+                    print(f"    ⚠️ Función {function.__name__} no completada. Reintentando...")
+                    return False
+            except Exception as e:
+                print(f"    ❌ Error al ejecutar la función {function.__name__}: {e}")
+                return False
+        # Operación en la web
+
         try:
             # Localizar elemento
             by = step["by"]

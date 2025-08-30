@@ -134,10 +134,10 @@ class Helper:
         """
         Genera un path dinámico válido basado en la fecha y el sufijo.
         """
-        formatted_today = fecha.strftime('%Y-%m-%d')
-        periodo = fecha.strftime('%Y-%m')
         if type == 'cerrado': 
-            path_dinamico = os.path.join(f"{periodo}{suffix}")
+            path_dinamico = os.path.join(f"{fecha}{suffix}")
         elif type == 'corriente':
+            formatted_today = fecha.strftime('%Y-%m-%d')
+            periodo = fecha.strftime('%Y-%m')
             path_dinamico = os.path.join(f"{periodo}",f"{formatted_today}{suffix}")
         return path_dinamico
