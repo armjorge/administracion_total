@@ -6,7 +6,7 @@ from utils.helpers import Helper  # Import the Helper class
 import pandas as pd
 import os
 import pickle
-
+from datawarehouse.datawarehouse import DataWarehouse
 
 class BankingManager:
     def __init__(self, working_folder, data_access, folder_root, path_tc_closed,corriente_temporal_downloads, fechas_corte, today, PICKLE_DEBITO_CORRIENTE, PICKLE_CREDITO_CORRIENTE, PICKLE_DEBIT_CLOSED, PICKLE_CREDIT_CLOSED):
@@ -37,6 +37,9 @@ class BankingManager:
             self.working_folder,
             self.data_access,
         )
+        self.reporting_folder = os.path.join(self.folder_root, "Implementación" "Estrategia")
+        self.datawarehouse = DataWarehouse(self.reporting_folder, self.data_access)
+
     def run_banking_menu(self):
         print(Helper.message_print("Bienvenido al menú bancario"))
         
@@ -45,6 +48,7 @@ class BankingManager:
             choice = input(f"""{Helper.message_print('¿Qué deseas hacer?')}
         1. Descargar
         2. Cargar a SQL, GoogleSheet
+        3. Estrategia y evaluación
         0. Salir
         Elige una opción: """).strip()
 
@@ -92,8 +96,8 @@ class BankingManager:
                         df= self.helper.corrige_fechas(df, 'file_date')      
                         # Actualizar la base de datos SQL
                         df.columns = df.columns.str.replace('.', '_').str.replace(' ', '_').str.lower()
-                        
-                        self.sql_operations.update_sql(df, schema_lake, key)
+                        sql_url = self.data_access['sql_url']
+                        self.sql_operations.update_sql(df, schema_lake, key, sql_url)
 
                         print(f"✅ Archivo {file_path} cargado exitosamente en la tabla {key} del esquema {schema_lake}.")
 
@@ -101,6 +105,8 @@ class BankingManager:
                         print(f"⚠️ Archivo no encontrado: {file_path}")
                     except Exception as e:
                         print(f"❌ Error al cargar el archivo {file_path}: {e}")
+            elif choice == "3":
+                self.datawarehouse.etl_process()
             elif choice == "0":
             
                 print("👋 ¡Hasta luego!")
@@ -125,4 +131,4 @@ class BankingManager:
                         print(f"❌ Archivo pickle no encontrado: {pickle_path}")
             print(f"✅ Todos los pickles exportados a: {output_excel}")
         except Exception as e:
-            print(f"❌ Error al exportar pickles a Excel: {e}")        
+            print(f"❌ Error al exportar pickles a Excel: {e}") 

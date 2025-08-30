@@ -10,8 +10,7 @@ class SQL_CONNEXION_UPDATING:
         # Create a DataIntegration instance to use its get_newest_file method
         #self.data_integration = DataIntegration(working_folder, data_access)
     
-    def sql_conexion(self):
-        sql_url = self.data_access['sql_url']
+    def sql_conexion(self, sql_url):
         #url example: 'postgresql://arXXXrge:XXX@ep-shy-darkness-10211313-poolXXXX.tech/neondb?sslmode=require&channel_binding=require'
         try:
             engine = create_engine(sql_url)
@@ -42,10 +41,10 @@ class SQL_CONNEXION_UPDATING:
             print(f"❌ Error creating schema '{schema_name}': {e}")
             return False
 
-    def update_sql(self, df_to_upload, schema, table_name):
+    def update_sql(self, df_to_upload, schema, table_name, sql_url):
         connexion = None
         try:
-            connexion = self.sql_conexion()
+            connexion = self.sql_conexion(sql_url)
             if connexion is None:
                 return False
 
