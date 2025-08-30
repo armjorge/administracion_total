@@ -5,12 +5,16 @@ from .sheets_updater import SheetsUpdater
 from utils.helpers import Helper  # Import the Helper class
 import pandas as pd
 import os
+import pickle
+
+
 class BankingManager:
     def __init__(self, working_folder, data_access, folder_root, path_tc_closed,corriente_temporal_downloads, fechas_corte, today, PICKLE_DEBITO_CORRIENTE, PICKLE_CREDITO_CORRIENTE, PICKLE_DEBIT_CLOSED, PICKLE_CREDIT_CLOSED):
         self.working_folder = working_folder
         self.data_access = data_access
         self.folder_root = folder_root
         self.path_tc_closed = path_tc_closed
+        self.path_repository_closed = os.path.join(self.path_tc_closed, "Repositorio por mes")
         self.corriente_temporal_downloads = corriente_temporal_downloads
         self.fechas_corte = fechas_corte
         self.today = today
@@ -47,20 +51,29 @@ class BankingManager:
             if choice == "1":
                 # Call the downloader workflow
                 self.descargador.descargador_workflow()
+
             elif choice == "2":
                 print("Cargar a SQL, GoogleSheet")
+                self.helper.feed_new_pickles(self.path_repository_closed, self.pickle_debito_cerrado, self.data_access['BANORTE_debit_headers'])
+                self.helper.feed_new_pickles(self.path_repository_closed, self.pickle_credito_cerrado, self.data_access['BANORTE_credit_headers'])
                 paths_destino = {}
                 suffix_debito = '_debito.csv'
                 partial_path_debito = self.helper.archivo_corriente_reciente(self.today, suffix_debito, 'corriente')
                 path_debito = os.path.join(self.working_folder,partial_path_debito )
-                paths_destino['debito_corriente'] = path_debito
+                pickle_debito = self.helper.update_pickle(path_debito, self.pickle_debito_corriente)
+                paths_destino['debito_corriente'] = self.pickle_debito_corriente
                 suffix_credit = '_credito.csv'
                 partial_path_credit = self.helper.archivo_corriente_reciente(self.today, suffix_credit, 'corriente')
                 path_credito = os.path.join(self.working_folder,partial_path_credit )
-                paths_destino['credito_corriente'] = path_credito
+                pickle_credito = self.helper.update_pickle(path_credito, self.pickle_credito_corriente)
+                paths_destino['credito_corriente'] = self.pickle_credito_corriente
                 paths_destino['credito_cerrado'] = self.pickle_credito_cerrado
                 paths_destino['debito_cerrado'] = self.pickle_debito_cerrado
+                print(f"Rutas de destino preparadas: {paths_destino}")
+                
                 schema_lake = 'banorte_lake'
+                output_excel = os.path.join(os.path.expanduser("~"), "Downloads", "Bancos.xlsx")
+                self.export_pickles_to_excel(paths_destino, output_excel)
                 self.sheets_updater.update_multiple_sheets(paths_destino)
                 
                 for key, file_path in paths_destino.items():
@@ -75,7 +88,8 @@ class BankingManager:
                         else:
                             print(f"⚠️ Formato de archivo no soportado: {file_path}")
                             continue
-
+                        df= self.helper.corrige_fechas(df, 'Fecha')
+                        df= self.helper.corrige_fechas(df, 'file_date')      
                         # Actualizar la base de datos SQL
                         df.columns = df.columns.str.replace('.', '_').str.replace(' ', '_').str.lower()
                         
@@ -93,3 +107,22 @@ class BankingManager:
                 return
             else:
                 print("\n⚠️ Elige una opción válida (1 o 0). Inténtalo de nuevo.\n")
+
+    def export_pickles_to_excel(self, paths_destino, output_excel): 
+        try:
+            with pd.ExcelWriter(output_excel, engine='openpyxl') as writer:
+                for sheet_name, pickle_path in paths_destino.items():
+                    if os.path.exists(pickle_path):
+                        with open(pickle_path, 'rb') as f:
+                            df = pickle.load(f)
+                            df= self.helper.corrige_fechas(df, 'Fecha')
+                            df= self.helper.corrige_fechas(df, 'file_date')
+                            # Limitar el nombre de la hoja a 31 caracteres
+                            sheet_name = sheet_name[:31]
+                            df.to_excel(writer, sheet_name=sheet_name, index=False)
+                            print(f"✅ Exportado {pickle_path} a la hoja {sheet_name}")
+                    else:
+                        print(f"❌ Archivo pickle no encontrado: {pickle_path}")
+            print(f"✅ Todos los pickles exportados a: {output_excel}")
+        except Exception as e:
+            print(f"❌ Error al exportar pickles a Excel: {e}")        

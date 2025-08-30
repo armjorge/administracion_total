@@ -1,6 +1,7 @@
 import os
 import pickle
 import subprocess
+import pandas as pd
 
 
 class Helper:
@@ -141,3 +142,195 @@ class Helper:
             periodo = fecha.strftime('%Y-%m')
             path_dinamico = os.path.join(f"{periodo}",f"{formatted_today}{suffix}")
         return path_dinamico
+    @staticmethod
+    def update_pickle(path_debito, pickle_debito):
+        """
+        Updates or creates a pickle file with the data from path_debito.
+        Replaces the entire content of the pickle file with the new data.
+        Adds 'file_date' and 'file_name' columns to the DataFrame.
+        """
+        import pandas as pd
+        import os
+        import pickle
+        from datetime import datetime, timedelta
+    
+        def get_previous_day_path(path):
+            """
+            Generates the file path for the previous day, considering folder changes.
+            """
+            try:
+                # Extract the date from the current file path
+                file_date_str = os.path.basename(path).split('_')[0]
+                file_date = datetime.strptime(file_date_str, '%Y-%m-%d')
+    
+                # Calculate the previous day
+                previous_day = file_date - timedelta(days=1)
+    
+                # Generate the new folder and file path
+                previous_folder = previous_day.strftime('%Y-%m')
+                previous_file = previous_day.strftime('%Y-%m-%d') + '_debito.csv'
+                previous_path = os.path.join(os.path.dirname(os.path.dirname(path)), previous_folder, previous_file)
+    
+                return previous_path
+            except Exception as e:
+                print(f"❌ Error al calcular el archivo del día anterior: {e}")
+                return None
+    
+        try:
+            # Check if path_debito exists
+            while not os.path.exists(path_debito):
+                separator = '!' * 50
+                print(f"\n{separator}\n❌ Archivo del día de hoy no encontrado: {os.path.basename(path_debito)}\n{separator}\n")
+                
+                previous_path = get_previous_day_path(path_debito)
+                if previous_path and os.path.exists(previous_path):
+                    print(f"🔄 Intentando con el archivo del día anterior: {previous_path}")
+                    path_debito = previous_path
+                else:
+                    print(f"❌ No se encontró archivo para el día anterior: {previous_path}")
+                    return
+    
+            # Load the CSV file into a DataFrame
+            df_debito = pd.read_csv(path_debito)
+            print(f"✅ Archivo origen cargado: {path_debito}")
+    
+            # Add 'file_date' and 'file_name' columns
+            file_date = pd.to_datetime(os.path.basename(path_debito).split('_')[0], errors='coerce')
+            file_name = os.path.basename(path_debito)
+            df_debito['file_date'] = file_date
+            df_debito['file_name'] = file_name
+    
+            # Replace the content of the pickle file
+            print(f"⚠️ Reemplazando el contenido del pickle: {pickle_debito}")
+            with open(pickle_debito, 'wb') as f:
+                pickle.dump(df_debito, f)
+                print(f"✅ Pickle actualizado con nueva información: {pickle_debito}")
+    
+        except Exception as e:
+            print(f"❌ Error al actualizar el pickle: {e}")
+
+    @staticmethod
+    def feed_new_pickles(pickle_folder, pickle_target, columns):
+        """
+        Feeds new CSV files into the pickle file if their records do not already exist.
+        """
+        import pandas as pd
+        import os
+        import pickle
+        from datetime import datetime
+
+        def get_file_creation_date(file_path):
+            """
+            Obtiene la fecha de creación del archivo desde las propiedades del sistema.
+            """
+            try:
+                creation_time = os.path.getctime(file_path)
+                return datetime.fromtimestamp(creation_time)
+            except Exception as e:
+                print(f"❌ Error al obtener la fecha de creación del archivo {file_path}: {e}")
+                return None
+
+        try:
+            # Get all CSV files in the folder
+            csv_files = [os.path.join(pickle_folder, f) for f in os.listdir(pickle_folder) if f.endswith('.csv')]
+            #print(f"📂 Archivos CSV encontrados: {csv_files}")
+
+            # Filter CSV files that match the required columns
+            csv_grupo = []
+            for file in csv_files:
+                try:
+                    df = pd.read_csv(file, nrows=1)
+                    if set(columns).issubset(df.columns):
+                        csv_grupo.append(file)
+                except Exception as e:
+                    print(f"❌ Error al leer columnas del archivo {file}: {e}")
+            print(f"📋 Archivos CSV que cumplen con las columnas requeridas: {csv_grupo}")
+
+            # Load the target pickle file
+            if os.path.exists(pickle_target):
+                with open(pickle_target, 'rb') as f:
+                    df_target = pickle.load(f)
+                print(f"✅ Pickle cargado: {pickle_target}")
+            else:
+                print(f"⚠️ Pickle no encontrado. Creando uno nuevo: {pickle_target}")
+                df_target = pd.DataFrame(columns=columns + ['file_name', 'file_date'])
+
+            # Iterate over filtered CSV files
+            for file in csv_grupo:
+                try:
+                    # Load the CSV file
+                    df = pd.read_csv(file)
+                    print(f"📄 Procesando archivo: {file}")
+
+                    # Exclude 'file_name' and 'file_date' from the comparison
+                    df_check = df[columns]
+                    df_target_check = df_target[columns]
+
+                    # Check if records already exist in df_target
+                    exists = df_check.apply(tuple, axis=1).isin(df_target_check.apply(tuple, axis=1))
+
+                    if exists.all():
+                        print(f"⚠️ Todos los registros del archivo {file} ya existen en el pickle.")
+                        continue
+
+                    # Add 'file_name' and 'file_date' columns
+                    df['file_name'] = os.path.basename(file)
+                    file_date = get_file_creation_date(file)
+                    if file_date:
+                        df['file_date'] = file_date
+
+                    # Append new records to df_target
+                    df_new = df[~exists]
+                    df_target = pd.concat([df_target, df_new], ignore_index=True)
+
+                    # Write back to pickle
+                    with open(pickle_target, 'wb') as f:
+                        pickle.dump(df_target, f)
+                    print(f"✅ Pickle actualizado con nuevos registros del archivo: {file}")
+
+                except Exception as e:
+                    print(f"❌ Error al procesar el archivo {file}: {e}")
+
+        except Exception as e:
+            print(f"❌ Error en feed_new_pickles: {e}")
+    @staticmethod
+    def corrige_fechas(df, columna_fecha):
+        """
+        Convierte fechas en formato 'dd/mm/yyyy' (como texto) a 'yyyy-mm-dd' en la columna especificada.
+        Si la fecha ya está en otro formato válido, la trunca al día.
+        Imprime cuántos renglones fueron cambiados.
+        """
+        import pandas as pd
+
+        if columna_fecha not in df.columns:
+            print(f"⚠️ La columna '{columna_fecha}' no existe en el DataFrame.")
+            return df
+
+        cambios = 0
+        df[columna_fecha] = df[columna_fecha].astype(str)
+
+        for idx, valor in df[columna_fecha].items():
+            nuevo_valor = valor
+            if '/' in valor:
+                try:
+                    nuevo_valor = pd.to_datetime(valor, format='%d/%m/%Y', errors='raise')
+                    # Truncar la hora a 00:00:00
+                    nuevo_valor = nuevo_valor.replace(hour=0, minute=0, second=0, microsecond=0)
+                except Exception:
+                    nuevo_valor = valor
+            else:
+                try:
+                    nuevo_valor = pd.to_datetime(valor, errors='raise')
+                    nuevo_valor = nuevo_valor.replace(hour=0, minute=0, second=0, microsecond=0)
+                except Exception:
+                    nuevo_valor = valor
+
+            if not pd.isnull(nuevo_valor) and str(nuevo_valor) != valor:
+                df.at[idx, columna_fecha] = nuevo_valor
+                cambios += 1
+
+        # Convertir toda la columna a datetime (por si acaso)
+        df[columna_fecha] = pd.to_datetime(df[columna_fecha], errors='coerce').dt.floor('D')
+
+        print(f"✅ Se cambiaron {cambios} renglones en la columna '{columna_fecha}'.")
+        return df

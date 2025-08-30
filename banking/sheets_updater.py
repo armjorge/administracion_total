@@ -3,13 +3,15 @@ import pandas as pd
 import numpy as np
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from utils.helpers import Helper  # Import the Helper class
+
 
 class SheetsUpdater:
     def __init__(self, working_folder, data_access):
         self.working_folder = working_folder
         self.data_access = data_access
         self.spreadsheet = None
-        
+        self.helper = Helper()
         # Inicializar conexión
         self._setup_connection()
     
@@ -51,7 +53,7 @@ class SheetsUpdater:
             worksheet.clear()
             
             # Procesar fechas si existen
-            df_processed = self._process_dataframe_for_sheets(dataframe.copy())
+            df_processed = dataframe.copy()
             
             # Mostrar información de debug para fechas
             #self._debug_date_conversion(sheet_name, dataframe, df_processed)
@@ -110,7 +112,11 @@ class SheetsUpdater:
                     df = pd.read_excel(path)
                 elif path.endswith('.pkl'):
                     df = pd.read_pickle(path)
-                    
+                    df= self.helper.corrige_fechas(df, 'Fecha')
+                    df= self.helper.corrige_fechas(df, 'file_date')
+                    for col in ['Fecha', 'file_date']:
+                        if col in df.columns:
+                            df[col] = df[col].astype(str)                                         
                 else:
                     print(f"⚠️ Formato de archivo no soportado: {path}")
                     continue

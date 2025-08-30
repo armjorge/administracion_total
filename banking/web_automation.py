@@ -176,7 +176,7 @@ class WebAutomation:
                 print("⚠️ No se encontraron archivos válidos. Esperando antes de reintentar...")
                 retries += 1
                 import time
-                time.sleep(10)  # Esperar 10 segundos antes de reintentar
+                input("\nPresiona Enter para continuar buscar de nuevo...\n")
 
         if retries == max_retries:
             print("❌ No se encontraron archivos después de varios intentos.")
