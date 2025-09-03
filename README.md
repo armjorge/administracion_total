@@ -107,4 +107,3 @@ administracion_total/
 - [ ] Índices por fecha/BRIN para performance
 - [ ] Dimensión fecha y métricas derivadas
 
-

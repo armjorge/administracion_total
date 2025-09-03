@@ -25,6 +25,7 @@ class DownloaderWorkflow:
 
         # Cargar y procesar las fechas de corte
         fechas_corte_credito = self.helper.load_pickle_as_dataframe(self.fechas_corte)
+        print(fechas_corte_credito.head(12))
         fechas_corte_credito['FECHA CORTE'] = pd.to_datetime(
             fechas_corte_credito['Fecha corte dd-mm-yyyy'],
             format='%d/%m/%Y',
@@ -37,21 +38,55 @@ class DownloaderWorkflow:
         # Filtrar filas donde el año y mes de 'FECHA CORTE' coincidan con el periodo actual
         fechas_corte_credito['period'] = fechas_corte_credito['FECHA CORTE'].dt.to_period('M')
         fechas_corte_credito_filtrado = fechas_corte_credito[fechas_corte_credito['period'] == today_period]
-        # Eliminar 'credito_cerrado' de la lista asociada a today_period si la fecha de corte es mayor a la fecha actual        # Si no hay fechas válidas en 'FECHA CORTE'
+
+        # Si no hay fechas válidas, escribe en el dataframe el input: verifica si la fecha de corte es mayor a la fecha actual
+        # Si no hay fechas válidas, escribe en el dataframe el input: verifica si la fecha de corte es mayor a la fecha actual
         if not fechas_corte_credito_filtrado['FECHA CORTE'].notna().any():
             print("⚠️ La columna 'FECHA CORTE' no contiene valores válidos de fecha.")
-            print("Función para actualizar una nueva fecha")
-            while True:
-                try:
-                    user_input = int(input("Escribe 1 si ya pasó la fecha de corte, 2 si no ha pasado: "))
-                    if user_input == 1:
-                        return expected_files  # Devuelve el diccionario actualizado
-                    elif user_input == 2:
-                        return expected_files  # Devuelve el diccionario original
-                    else:
-                        print("Entrada no válida. Por favor, escribe 1 o 2.")
-                except ValueError:
-                    print("Entrada no válida. Por favor, escribe un número (1 o 2).")
+            # Crear la fecha por defecto: día 5 del mes del periodo actual
+            default_date = pd.to_datetime(today_period + '-05', format='%Y-%m-%d')
+            
+            df_to_update = self.helper.load_pickle_as_dataframe(self.fechas_corte)
+            # Agregar las columnas necesarias para procesar 'period'
+            df_to_update['FECHA CORTE'] = pd.to_datetime(
+                df_to_update['Fecha corte dd-mm-yyyy'],
+                format='%d/%m/%Y',
+                errors='coerce'
+            )
+            df_to_update['period'] = df_to_update['FECHA CORTE'].dt.to_period('M')
+            
+            # Mapear el mes numérico a español
+            month_num = pd.to_datetime(today_period).month
+            month_spanish = {
+                1: 'Enero', 2: 'Febrero', 3: 'Marzo', 4: 'Abril', 5: 'Mayo', 6: 'Junio',
+                7: 'Julio', 8: 'Agosto', 9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre'
+            }.get(month_num, 'Desconocido')
+            
+            # Verificar si existe una fila para el mes en español
+            if (df_to_update['Mes'] == month_spanish).any():
+                # Actualizar la fila existente
+                df_to_update.loc[df_to_update['Mes'] == month_spanish, 'Fecha corte dd-mm-yyyy'] = default_date.strftime('%d/%m/%Y')
+            else:
+                # Agregar una nueva fila si no existe (aunque probablemente siempre exista)
+                new_row = {'Mes': month_spanish, 'Fecha corte dd-mm-yyyy': default_date.strftime('%d/%m/%Y')}
+                df_to_update = pd.concat([df_to_update, pd.DataFrame([new_row])], ignore_index=True)
+            
+            # Eliminar las columnas temporales antes de guardar
+            df_to_update.drop(columns=['FECHA CORTE', 'period'], inplace=True, errors='ignore')
+            # Guardar directamente sin confirmación
+            self.helper.save_dataframe_to_pickle(df_to_update, self.fechas_corte)
+            print("✅ Fecha actualizada en el pickle.")
+            
+            # Recargar el DataFrame actualizado y recalcular el filtro
+            fechas_corte_credito = self.helper.load_pickle_as_dataframe(self.fechas_corte)
+            fechas_corte_credito['FECHA CORTE'] = pd.to_datetime(
+                fechas_corte_credito['Fecha corte dd-mm-yyyy'],
+                format='%d/%m/%Y',
+                errors='coerce'
+            )
+            fechas_corte_credito['period'] = fechas_corte_credito['FECHA CORTE'].dt.to_period('M')
+            fechas_corte_credito_filtrado = fechas_corte_credito[fechas_corte_credito['period'] == today_period]
+            
         else:
             # Si hay fechas válidas, verifica si la fecha de corte es mayor a la fecha actual
             print(f"La fecha de corte crédito existe, procedemos a revisar si {fechas_corte_credito_filtrado['Fecha corte dd-mm-yyyy'].values[0]} es mayor a {self.today}")
@@ -59,9 +94,13 @@ class DownloaderWorkflow:
 
         # Comparar la fecha actual con la primera fecha de corte válida
         if pd.Timestamp(self.today) < fechas_corte_credito_filtrado['FECHA CORTE'].values[0]:
-            return expected_files[today_period].remove('credito_cerrado')  # Devuelve el diccionario actualizado
+            expected_files[today_period].remove('credito_cerrado')
+            return expected_files  # Devuelve el diccionario actualizado
         else:
             return expected_files  # Devuelve el diccionario original
+
+
+
     def get_newest_file(self, period, suffix):
         path_dinamico = os.path.join(self.working_folder, f"{period}")
         self.helper.create_directory_if_not_exists(path_dinamico)

@@ -71,6 +71,117 @@ class Helper:
             print(f"Error loading pickle file: {e}")
             return None
     @staticmethod
+    def save_dataframe_to_pickle(dataframe, pickle_path):
+        """
+        Compara un DataFrame nuevo contra el almacenado en un pickle (si existe),
+        muestra un resumen de diferencias y pide confirmación para sobrescribir.
+
+        Params
+        - dataframe: pandas.DataFrame a guardar
+        - pickle_path: ruta del archivo pickle destino
+        """
+        import pandas as pd
+        import numpy as np
+        try:
+            if not isinstance(dataframe, pd.DataFrame):
+                print("❌ El argumento 'dataframe' debe ser un pandas.DataFrame")
+                return
+
+            # Cargar el DataFrame actual si existe
+            df_actual = Helper.load_pickle_as_dataframe(pickle_path)
+            
+            # Comparar y mostrar heads solo si hay diferencias
+            if df_actual is not None and isinstance(df_actual, pd.DataFrame):
+                if df_actual.equals(dataframe):
+                    print("Los DataFrames son iguales.")
+                    print("Head de ambos:\n", df_actual.head())
+                else:
+                    # Encontrar filas diferentes (usando columnas comunes)
+                    common_cols = list(set(df_actual.columns) & set(dataframe.columns))
+                    if common_cols:
+                        df_actual_common = df_actual[common_cols].reset_index(drop=True)
+                        dataframe_common = dataframe[common_cols].reset_index(drop=True)
+                        diff_rows = pd.concat([df_actual_common, dataframe_common]).drop_duplicates(keep=False)
+                        if not diff_rows.empty:
+                            print("Filas diferentes (head):")
+                            print(diff_rows.head())
+                        else:
+                            print("Los DataFrames son iguales (después de comparar columnas comunes).")
+                            print("Head:\n", df_actual.head())
+                    else:
+                        print("No hay columnas en común para comparar.")
+                        print("DF en el archivo \n", df_actual.head())
+                        print("DF Actualizado \n", dataframe.head())
+            else:
+                print("No hay DF actual para comparar.")
+                print("DF Actualizado \n", dataframe.head())
+            # Resumen básico
+            print("\n==== Resumen de diferencias del pickle ====")
+            print(f"Destino: {pickle_path}")
+            print(f"Nuevo: filas={len(dataframe)}, columnas={len(dataframe.columns)}")
+            if df_actual is None:
+                print("Actual: no existe pickle actual")
+            elif not isinstance(df_actual, pd.DataFrame):
+                print("Actual: el contenido del pickle no es un DataFrame válido")
+            else:
+                print(f"Actual: filas={len(df_actual)}, columnas={len(df_actual.columns)}")
+
+                # Diferencias de columnas
+                cols_nuevo = set(map(str, dataframe.columns))
+                cols_actual = set(map(str, df_actual.columns))
+                cols_agregadas = sorted(list(cols_nuevo - cols_actual))
+                cols_eliminadas = sorted(list(cols_actual - cols_nuevo))
+                if cols_agregadas:
+                    print(f"Columnas agregadas: {cols_agregadas}")
+                if cols_eliminadas:
+                    print(f"Columnas eliminadas: {cols_eliminadas}")
+
+                # Diferencias de filas usando columnas en común
+                columnas_comunes = [c for c in dataframe.columns if c in df_actual.columns]
+                if columnas_comunes:
+                    try:
+                        comunes_ordenadas = list(map(str, columnas_comunes))
+                        # Convertimos a string para comparación robusta y crear llaves por fila
+                        claves_nuevo = set(
+                            map(
+                                tuple,
+                                dataframe[comunes_ordenadas].astype(str).itertuples(index=False, name=None)
+                            )
+                        )
+                        claves_actual = set(
+                            map(
+                                tuple,
+                                df_actual[comunes_ordenadas].astype(str).itertuples(index=False, name=None)
+                            )
+                        )
+                        filas_agregadas = len(claves_nuevo - claves_actual)
+                        filas_eliminadas = len(claves_actual - claves_nuevo)
+                        print(f"Filas agregadas (vs. actual): {filas_agregadas}")
+                        print(f"Filas eliminadas (vs. actual): {filas_eliminadas}")
+                    except Exception as e:
+                        print(f"⚠️ No fue posible calcular diferencias de filas: {e}")
+                else:
+                    print("⚠️ No hay columnas en común para comparar filas.")
+
+            # Confirmación del usuario
+            respuesta = input("\n¿Deseas actualizar el pickle con el DataFrame nuevo? (s/N): ").strip().lower()
+            if respuesta not in ("s", "si", "sí", "y", "yes"):
+                print("Operación cancelada. No se modificó el pickle.")
+                return
+
+            # Asegurar carpeta destino
+            carpeta = os.path.dirname(pickle_path)
+            if carpeta:
+                Helper.create_directory_if_not_exists(carpeta)
+
+            # Guardar pickle
+            with open(pickle_path, 'wb') as f:
+                pickle.dump(dataframe, f)
+            print(f"✅ Pickle actualizado correctamente: {pickle_path}")
+
+        except Exception as e:
+            print(f"❌ Error en save_dataframe_to_pickle: {e}")
+    @staticmethod
     def get_files_in_directory(directory):
         """
         Busca archivos en un directorio dado.
