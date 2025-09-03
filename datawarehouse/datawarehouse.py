@@ -3,7 +3,10 @@ import os  # Import the os module
 import yaml
 from sqlalchemy import create_engine, text
 import pandas as pd
-from generador_reportes import GeneradorReportes
+try:
+    from .generador_reportes import GeneradorReportes
+except ImportError:
+    from generador_reportes import GeneradorReportes
 
 class DataWarehouse:
     def __init__(self, strategy_folder, data_access):
