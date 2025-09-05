@@ -83,7 +83,6 @@ class Conceptos:
             df_source_credito.to_pickle(self.mirror_credito_path)
             df_mirror_credito = df_source_credito  # Ensure df_mirror_credito is defined
         print(f"✅ Dataframes espejo creados con {len(df_mirror_debito)} filas en DÉBITO y {len(df_mirror_credito)} filas en CRÉDITO.")
-        self.export_mirror_excel()
 
     def dataframes_from_source(self, dict_dataframes):
         df_source_credito = pd.concat([
@@ -112,8 +111,13 @@ class Conceptos:
         column_key_credito = ['fecha', 'concepto', 'abono', 'cargo', 'tarjeta']
         column_key_debito = ['fecha', 'concepto', 'cargos', 'abonos', 'saldos']
         update_columns = ['file_date', 'file_name']
+        
+        # Ejecutar mirror (que ahora primero sincroniza file_name/file_date por llave, luego agrega/elimina si hace falta)
         self.mirror(df_source_credito, self.mirror_credito_path, column_key_credito, update_columns)
         self.mirror(df_source_debito, self.mirror_debito_path, column_key_debito, update_columns)
+        # Exportar a Excel al final
+        print("📝 Exportando Mirror.xlsx tras actualizar ambos mirrors…")
+        self.export_mirror_excel()
 
     def mirror(self, df_source, mirror_path, match_columns, update_columns):
         # Cargar espejo
@@ -140,80 +144,62 @@ class Conceptos:
             print("⚠️ Columnas a actualizar faltantes en source; no se puede continuar:", [c for c in update_columns if c not in df_source.columns])
             return
 
-        # No agregar columnas nuevas: solo operar con las que ya existen en el mirror
-        common_cols = [c for c in df_mirror.columns if c in df_source.columns]
-
-        # Claves únicas de ambos
-        source_keys = df_source[match_columns].drop_duplicates()
-        mirror_keys = df_mirror[match_columns].drop_duplicates()
-
-        # Filas nuevas (en source y no en mirror) - agregar una fila por clave
-        new_keys = source_keys.merge(mirror_keys, on=match_columns, how='left', indicator=True)
-        new_keys = new_keys.loc[new_keys['_merge'] == 'left_only', match_columns]
-        if len(new_keys) > 0:
-            # Representante por clave desde source
-            src_unique = df_source.drop_duplicates(subset=match_columns, keep='last')
-            rows_to_add = src_unique.merge(new_keys, on=match_columns, how='inner')
-            rows_to_add = rows_to_add[common_cols]
-            df_mirror = pd.concat([df_mirror, rows_to_add], ignore_index=True)
-        added = len(new_keys)
-
-        # Filas perdidas (en mirror y no en source) - eliminar
-        lost_keys = mirror_keys.merge(source_keys, on=match_columns, how='left', indicator=True)
-        lost_keys = lost_keys.loc[lost_keys['_merge'] == 'left_only', match_columns]
-        if len(lost_keys) > 0:
-            mk = df_mirror[match_columns]
-            keep_mask = mk.merge(source_keys, on=match_columns, how='left', indicator=True)['_merge'].eq('both')
-            df_mirror = df_mirror.loc[keep_mask].reset_index(drop=True)
-        removed = len(lost_keys)
-
-        # Actualizar columnas actualizables basadas en las llaves
-        # Copia previa para medir cambios
-        prev_updates = None
-        try:
-            prev_updates = df_mirror[update_columns].copy()
-        except Exception:
-            prev_updates = None
-
-        src_unique_for_update = df_source.drop_duplicates(subset=match_columns, keep='last')
-        upd = df_mirror[match_columns].merge(
-            src_unique_for_update[match_columns + update_columns],
-            on=match_columns,
-            how='left'
-        )
-        for col in update_columns:
-            df_mirror[col] = upd[col].values
-
-        # Conteo de filas actualizadas
-        updated = 0
-        if prev_updates is not None:
-            diff_any = None
-            for col in update_columns:
-                a = df_mirror[col]
-                b = prev_updates[col]
-                neq = ~((a == b) | (a.isna() & b.isna()))
-                diff_any = neq if diff_any is None else (diff_any | neq)
-            updated = int(diff_any.sum()) if diff_any is not None else 0
-
-        # Verificación básica: mismas llaves en ambos
-        final_keys = df_mirror[match_columns].drop_duplicates()
-        only_source = source_keys.merge(final_keys, on=match_columns, how='left', indicator=True)
-        only_source = int((only_source['_merge'] == 'left_only').sum())
-        only_mirror = final_keys.merge(source_keys, on=match_columns, how='left', indicator=True)
-        only_mirror = int((only_mirror['_merge'] == 'left_only').sum())
-        if only_source == 0 and only_mirror == 0:
-            print(f"✅ Mirror actualizado: +{added} añadidas, -{removed} eliminadas, {updated} filas con valores de actualización cambiados")
-        else:
-            print(f"⚠️ Desajuste de llaves tras la actualización (solo_source={only_source}, solo_mirror={only_mirror})")
-
-        # Guardar sin alterar el conjunto de columnas del mirror
+        side = 'CRÉDITO' if 'credito' in os.path.basename(mirror_path) else 'DÉBITO'
+        
+        # Get unique filenames from both dataframes
+        unique_filename_source = set(df_source['file_name'].dropna().unique())
+        unique_filename_mirror = set(df_mirror['file_name'].dropna().unique())
+        
+        # Files in both (need to update)
+        files_to_update = unique_filename_source ^ unique_filename_mirror
+        
+        if not files_to_update:
+            print(f"[{side}] No hay archivos comunes para actualizar")
+            return
+        
+        print(f"[{side}] Archivos a actualizar: {list(files_to_update)}")
+        
+        # Process files to update only
+        for filename in files_to_update:
+            mirror_rows = df_mirror[df_mirror['file_name'] == filename].copy()
+            source_rows = df_source[df_source['file_name'] == filename].copy()
+            
+            print(f"[{side}] Actualizando filas para archivo: {filename}")
+            updated_count = 0
+            
+            # Update mirror rows row by row
+            for mirror_idx, mirror_row in mirror_rows.iterrows():
+                # Get the actual index in df_mirror
+                actual_mirror_idx = df_mirror[
+                    (df_mirror['file_name'] == filename) & 
+                    (df_mirror[match_columns[0]] == mirror_row[match_columns[0]])
+                ].index
+                
+                if len(actual_mirror_idx) > 0:
+                    actual_idx = actual_mirror_idx[0]
+                    # Create search criteria using match_columns
+                    search_criteria = True
+                    for col in match_columns:
+                        search_criteria = search_criteria & (source_rows[col] == mirror_row[col])
+                    
+                    matching_source = source_rows[search_criteria]
+                    
+                    if not matching_source.empty:
+                        # Update the row in df_mirror with values from source
+                        for update_col in update_columns:
+                            if update_col in matching_source.columns:
+                                df_mirror.loc[actual_idx, update_col] = matching_source[update_col].iloc[0]
+                                updated_count += 1
+            
+            if updated_count > 0:
+                print(f"💡 [{side}] Sincronizadas columnas {update_columns} por llave (celdas cambiadas={updated_count})")
+        
+        # Save the updated mirror
         try:
             df_mirror.to_pickle(mirror_path)
             print(f"💾 Guardado: {mirror_path}")
         except Exception as e:
             print(f"❌ No se pudo guardar el mirror en '{mirror_path}': {e}")
-
-        self.export_mirror_excel()
 def main():
     folder_root = os.getcwd()
     strategy_folder = os.path.join(folder_root, "Implementación", "Estrategia")
