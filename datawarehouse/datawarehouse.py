@@ -7,6 +7,10 @@ try:
     from .generador_reportes import GeneradorReportes
 except ImportError:
     from generador_reportes import GeneradorReportes
+try:
+    from .conceptos import Conceptos
+except ImportError:
+    from conceptos import Conceptos
 
 class DataWarehouse:
     def __init__(self, strategy_folder, data_access):
@@ -14,6 +18,7 @@ class DataWarehouse:
         self.data_access = data_access
         #self.helper = Helper()
         self.generador_reportes = GeneradorReportes(self.data_access, self.strategy_folder)
+        self.conceptos = Conceptos(self.strategy_folder, self.data_access)
 
     def _get_table_columns(self, engine, schema: str, table: str):
         """Return ordered list of column names for a given schema.table from information_schema."""
@@ -185,12 +190,29 @@ class DataWarehouse:
         print(f"🧱 Vista {view_schema}.{view_name} creada/actualizada")
 
     def etl_process(self):
+        dataframes_dict = {}
+
         source_url = self.data_access['sql_url']
         target_url = self.data_access['local_sql_url']
 
         source_schema = 'banorte_lake'
         source_tables_credito = ['credito_cerrado', 'credito_corriente']
         source_tables_debito = ['debito_cerrado', 'debito_corriente']
+        conceptos_master_file = os.path.join(self.strategy_folder, 'Conceptos.xlsx')
+        if not os.path.exists(conceptos_master_file):
+            df_conceptos_columnas = pd.DataFrame({
+                'beneficiario': [None] * 5,
+                'categoria': ['Pensiones', 'Reembolsos Eseotres', 'Reembolsos Bombón', 'Casa', 'Ocio', 'Salud'][:5],  # Adjusted to 5 items
+                'grupo': ['Gasto fijo', 'No clasificado', 'Vivienda'] + [None] * 2,
+                'clave_presupuestal': [None] * 5,
+                'concepto_procesado': [None] * 5
+            })
+            df_conceptos_columnas.to_excel(conceptos_master_file, index=False)
+
+        df_conceptos = pd.read_excel(conceptos_master_file)
+        dataframes_dict['conceptos'] = df_conceptos
+        print(df_conceptos.head())
+
         
         print(f"Folder de trabajo {self.strategy_folder}")
         print(f"Conectando a la fuente de datos: {source_url}")
@@ -215,7 +237,15 @@ class DataWarehouse:
         except Exception as e:
             print(f"❌ Error conectando al destino: {e}")
             return
-
+        df_credito_corriente = pd.read_sql(text(f'SELECT * FROM "{source_schema}"."credito_corriente"'), src_engine)
+        df_credito_cerrado = pd.read_sql(text(f'SELECT * FROM "{source_schema}"."credito_cerrado"'), src_engine)
+        df_debito_corriente = pd.read_sql(text(f'SELECT * FROM "{source_schema}"."debito_corriente"'), src_engine)
+        df_debito_cerrado = pd.read_sql(text(f'SELECT * FROM "{source_schema}"."debito_cerrado"'), src_engine)
+        dataframes_dict['credito_corriente'] = df_credito_corriente
+        dataframes_dict['credito_cerrado'] = df_credito_cerrado
+        dataframes_dict['debito_corriente'] = df_debito_corriente
+        dataframes_dict['debito_cerrado'] = df_debito_cerrado
+        self.conceptos.generador_de_conceptos(dataframes_dict)
         # Esquemas destino
         raw_schema_tgt = 'raw_banorte'
         stage_schema_tgt = 'stage_banorte'

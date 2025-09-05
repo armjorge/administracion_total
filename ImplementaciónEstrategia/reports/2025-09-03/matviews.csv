@@ -1,0 +1,3 @@
+schema,name
+dw_banorte,mv_diario_tipo
+dw_banorte,mv_mensual_estado

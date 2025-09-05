@@ -1,0 +1,6 @@
+schema
+banorte_conceptos
+dw_banorte
+public
+raw_banorte
+stage_banorte

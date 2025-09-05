@@ -127,9 +127,14 @@ class DownloaderWorkflow:
                         print(f"✅ Archivo encontrado en el DataFrame para el patrón '{key}':")
                         unique_files = filtered_rows['file_name'].unique()
                         print(unique_files)  # Mostrar los nombres de archivo únicos encontrados
-                        expected_files[key].remove('credito_cerrado')  # Eliminar 'credito_cerrado' de la lista
+                        expected_files[key].remove('credito_cerrado')
+                          # Eliminar 'credito_cerrado' de la lista
                     else:
                         print(f"⚠️ No se encontraron archivos para el patrón '{key}' en el DataFrame.")
+                        if pd.to_datetime(self.today).day <= 10:
+                            user_choice = input("Estamos cerca de los días de corte. ¿El banco tiene disponible el archivo con corte? (s/n): ")
+                            if user_choice.lower() in ['n', 'no']:
+                                expected_files[key].remove('credito_cerrado')
                 elif item == 'credito_corriente': 
                     print(f"Procesando 'credito_corriente' para el periodo {key}")
                     suffix = '_credito'
@@ -168,6 +173,7 @@ class DownloaderWorkflow:
 
                 else:
                     print(f"⚠️ Tipo de archivo desconocido: {item}")
+        print("\n\nDEBUG\n\n", expected_files)
         return expected_files
     
     def descargador_workflow(self):
@@ -236,7 +242,8 @@ class DownloaderWorkflow:
                     tipo_archivos.remove('debito_corriente')  # Remover si es necesario
                 archivos_faltantes_corriente = tipo_archivos  # Actualizar la lista de archivos faltantes
                 print(f"Archivos faltantes Mes corriente a descargar: {archivos_faltantes_corriente}")
-                print(self.helper.message_print(f"Vamos a descargar archivos cerrados de {archivos_faltantes_corriente}, estos son fijos y corresponden al periodo {periodo}"))
+                print(self.helper.message_print(f"Vamos a descargar {archivos_faltantes_corriente} del mes {periodo}"))
+                
                 if archivos_faltantes_corriente: 
                     self.web_automation.execute_download_session(self.corriente_temporal_downloads, archivos_faltantes_corriente, periodo)
 

@@ -80,7 +80,9 @@ class WebAutomation:
     
     def execute_download_session(self, download_folder, archivos_faltantes, periodo):
         """Ejecuta una sesión completa de descarga"""
-        print(f"Path del directorio de descargas en execute_download_session: {download_folder}")
+        if any('cerrado' in archivo for archivo in archivos_faltantes):
+            print(self.helper.message_print("MES CERRADO: Débito: meses anteriores al mes actual. \nCrédito: Al último corte, dos cortes atrás. \nEn ningún caso es después del corte o del 1 de este mes al día de hoy."))
+        print(f"Path del directorio de descargas en execute_download_session: {os.path.join(*download_folder.split(os.sep)[-2:])}")
         if not self.chrome_driver_load:
             print("❌ Driver de Chrome no disponible")
             return False

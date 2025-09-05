@@ -1,0 +1,8 @@
+schema,name,kind,bytes_total,rows_estimated
+dw_banorte,movimientos,table,614400,-1.0
+dw_banorte,mv_diario_tipo,table,81920,508.0
+dw_banorte,mv_mensual_estado,table,40960,27.0
+raw_banorte,credito_cerrado,table,368640,1329.0
+raw_banorte,credito_corriente,table,49152,-1.0
+raw_banorte,debito_cerrado,table,106496,251.0
+raw_banorte,debito_corriente,table,16384,-1.0
