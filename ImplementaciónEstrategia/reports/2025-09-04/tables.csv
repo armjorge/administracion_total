@@ -1,6 +1,0 @@
-schema,name
-dw_banorte,movimientos
-raw_banorte,credito_cerrado
-raw_banorte,credito_corriente
-raw_banorte,debito_cerrado
-raw_banorte,debito_corriente

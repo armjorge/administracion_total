@@ -37,7 +37,8 @@ class BankingManager:
             self.working_folder,
             self.data_access,
         )
-        self.reporting_folder = os.path.join(self.folder_root, "Implementación" "Estrategia")
+        # Fix path: ensure 'Implementación/Estrategia' with a path separator
+        self.reporting_folder = os.path.join(self.folder_root, "Implementación", "Estrategia")
         self.datawarehouse = DataWarehouse(self.reporting_folder, self.data_access)
 
     def run_banking_menu(self):
