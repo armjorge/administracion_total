@@ -273,6 +273,7 @@ class DataWarehouse:
         for file in sql_files:
             self.print_query_results(src_engine, file)
 
+
     def print_query_results(self, engine, sql_file):
         """Execute the query and print the output in terminal. The files are already tested, so we only need to run them."""
         file_path = os.path.join(self.queries_folder, sql_file)
@@ -280,8 +281,17 @@ class DataWarehouse:
             query = f.read()
         try:
             df = pd.read_sql(text(query), engine)
+            # Replace NaN/None with empty string
+            df = df.fillna('')
+            # Format numeric columns as currency ($ with commas)
+            formatters = {}
+            for col in df.columns:
+                if df[col].dtype in ['float64', 'int64']:
+                    formatters[col] = lambda x: f"${x:,.2f}" if x != '' else ''
+                else:
+                    formatters[col] = str
             print(f"\n📊 Results for {sql_file}:")
-            print(df.to_string(index=False))
+            print(df.to_string(index=False, formatters=formatters))
         except Exception as e:
             print(f"❌ Error executing {sql_file}: {e}")
 

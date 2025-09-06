@@ -27,7 +27,39 @@ class Conceptos:
         self.mirror_debito_path = os.path.join(self.strategy_folder, 'mirror_debito.pkl')
         self.conceptos_master = os.path.join(self.strategy_folder, 'Conceptos.xlsx')
         self.mirror_excel_path = os.path.join(self.strategy_folder, 'Mirror.xlsx')
+        self.conceptos_temporal_path = os.path.join(self.strategy_folder, 'Conceptos temporales')
+        self.excel_credit_conceptos = os.path.join(self.conceptos_temporal_path, "credito","credito_corriente.xlsx")
+        self.excel_debito_conceptos = os.path.join(self.conceptos_temporal_path, "debito", "debito_corriente.xlsx")
+    def load_local_pickle(self, path, df_source):
+        # Load mirror
+        try:
+            df_mirror = pd.read_pickle(mirror_path)
+        except Exception as e:
+            print(f"❌ No se pudo leer el mirror '{mirror_path}': {e}")
+            return
 
+        # Reset index to ensure unique indices (fixes concat error)
+        df_mirror = df_mirror.reset_index(drop=True)
+        df_source = df_source.reset_index(drop=True)
+
+        # Normalize dtypes for match_columns (similar to mirror_file_date_file_name_from_source)
+        def _normalize_string_series(ser: pd.Series) -> pd.Series:
+            ser = ser.astype('string')
+            ser = ser.str.replace(r"\s+", " ", regex=True).str.strip()
+            return ser
+
+        for col in match_columns:
+            if pd.api.types.is_datetime64_any_dtype(df_source[col]):
+                df_source[col] = pd.to_datetime(df_source[col], errors='coerce').dt.normalize()
+                df_mirror[col] = pd.to_datetime(df_mirror[col], errors='coerce').dt.normalize()
+            elif pd.api.types.is_numeric_dtype(df_source[col]):
+                df_source[col] = pd.to_numeric(df_source[col], errors='coerce')
+                df_mirror[col] = pd.to_numeric(df_mirror[col], errors='coerce')
+            else:
+                df_source[col] = _normalize_string_series(df_source[col])
+                df_mirror[col] = _normalize_string_series(df_mirror[col])
+        return df_mirror
+               
     def export_mirror_excel(self):
         # Cargar pickles (si no existen, usar DF vacío)
         df_credito = pd.read_pickle(self.mirror_credito_path)
@@ -126,15 +158,52 @@ class Conceptos:
         self.remove_or_add_rows(df_source_credito, self.mirror_credito_path, column_key_credito, update_columns)
         # En este momento, tenemos los mimso rows en source y mirror, y file_name/file_date actualizados
         # 3 Actualizar las columnas de conceptos (beneficiario, categoria, grupo,
-        conceptual_columns = pd.read_excel(self.conceptos_master).columns.tolist()
-
-        excel_credit_conceptos = os.path.join(self.strategy_folder, "Conceptos temporales", "credito", "credito_corriente.xlsx")
-        excel_debito_conceptos = os.path.join(self.strategy_folder, "Conceptos temporales", "debito", "debito_corriente.xlsx")
-        self.add_conceptual_columns(self.mirror_debito_path, column_key_debito, excel_debito_conceptos, conceptual_columns)
-        self.add_conceptual_columns(self.mirror_credito_path, column_key_credito, excel_credit_conceptos, conceptual_columns)
+        update_extra_columns = False
+        update_extra_columns = self.extra_columns_management()
         # Exportar a Excel al final
         print("📝 Exportando Mirror.xlsx tras actualizar ambos mirrors…")
         self.export_mirror_excel()
+
+    def extra_columns_management(self):
+        print(self.helper.message_print("\n🔄 los Pickle Locales ya tienen la misma información que la fuente SQL"))
+        print("""
+        Ahora vamos a agregar las columnas conceptuales (beneficiario, categoria, grupo, clave_presupuestal, concepto_procesado)
+              1) Selecciona para llenar crédito y 2) para débito  
+              """ )
+        column_key_credito = ['fecha', 'concepto', 'abono', 'cargo', 'tarjeta']
+        column_key_debito = ['fecha', 'concepto', 'cargos', 'abonos', 'saldos']       
+        conceptual_columns = pd.read_excel(self.conceptos_master).columns.tolist()
+
+        self.mirror_credito_path = os.path.join(self.strategy_folder, 'mirror_credito.pkl')
+        self.mirror_debito_path = os.path.join(self.strategy_folder, 'mirror_debito.pkl')        
+        self.excel_credit_conceptos
+        self.excel_debito_conceptos
+        # Load mirror
+        try:
+            df_mirror_credito = pd.read_pickle(self.mirror_credito_path)
+        except Exception as e:
+            print(f"❌ No se pudo leer el mirror '{self.mirror_credito_path}': {e}")
+            return
+        try:
+            df_mirror_debito = pd.read_pickle(self.mirror_debito_path)
+        except Exception as e:
+            print(f"❌ No se pudo leer el mirror '{self.mirror_debito_path}': {e}")
+            return
+        if df_mirror_credito is not None and not df_mirror_credito.empty: 
+            self.helper.message_print("\n🔄 Abriendo Excel para que agregues/edites las columnas conceptuales en CRÉDITO…")
+            df_mirror_credito.to_excel(self.excel_credit_conceptos, index=False)
+            self.helper.open_xlsx_file(self.excel_credit_conceptos)
+            input("\nPresiona Enter cuando hayas terminado de editar el archivo de crédito...")
+            self.add_conceptual_columns(self.mirror_credito_path, column_key_credito, self.excel_credit_conceptos, conceptual_columns)
+        if df_mirror_debito is not None and not df_mirror_debito.empty:
+            self.helper.message_print("\n🔄 Abriendo Excel para que agregues/edites las columnas conceptuales en DÉBITO…")
+            df_mirror_debito.to_excel(self.excel_debito_conceptos, index=False)
+            self.helper.open_xlsx_file(self.excel_debito_conceptos)
+            input("\nPresiona Enter cuando hayas terminado de editar el archivo de débito...")
+            self.add_conceptual_columns(self.mirror_debito_path, column_key_debito, self.excel_debito_conceptos, conceptual_columns)
+
+
+
     def add_conceptual_columns(self, mirror_path, match_columns, excel_with_concepts, conceptual_columns):
         """
         Adds/updates conceptual columns from excel_with_concepts to df_mirror based on match_columns.
@@ -225,7 +294,6 @@ class Conceptos:
         # Save updated mirror
         df_mirror.to_pickle(mirror_path)
         print(f"✅ Columnas conceptuales agregadas/actualizadas. Guardado en {mirror_path}")
-
 
     def remove_or_add_rows(self, df_source, mirror_path, match_columns, update_columns):
         """

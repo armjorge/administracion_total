@@ -445,3 +445,20 @@ class Helper:
 
         print(f"✅ Se cambiaron {cambios} renglones en la columna '{columna_fecha}'.")
         return df
+
+    @staticmethod
+    def open_xlsx_file(file_path):
+        """Abre un archivo XLSX con Excel si la ruta termina en .xlsx"""
+        if not file_path.lower().endswith('.xlsx'):
+            print(f"Error: El archivo no es un XLSX válido: {file_path}")
+            return
+        try:
+            if os.name == 'nt':  # Windows
+                os.startfile(file_path)
+            elif os.name == 'posix':  # macOS o Linux
+                if "darwin" in os.uname().sysname.lower():  # macOS
+                    subprocess.run(["open", file_path])
+                else:  # Linux
+                    subprocess.run(["xdg-open", file_path])
+        except Exception as e:
+            print(f"Error opening XLSX file: {e}")
