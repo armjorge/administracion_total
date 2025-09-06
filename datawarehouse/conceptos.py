@@ -106,6 +106,9 @@ class Conceptos:
         self.generar_mirror_dataframes(dict_dataframes)        
         print(self.helper.message_print("2 Actualizando los espejos locales con los archivos de la base SQL"))
         self.actualiza(dict_dataframes)
+        print("Nuestro espejo tiene las mismas filas y columnas que la fuente en SQL, procedemos a cargar a SQL para su minería.")
+        return True
+        
       
 
     def actualiza(self, dict_dataframes):
@@ -115,17 +118,115 @@ class Conceptos:
         column_key_debito = ['fecha', 'concepto', 'cargos', 'abonos', 'saldos']
         update_columns = ['file_date', 'file_name']
         
-        # Ejecutar mirror (que ahora primero sincroniza file_name/file_date por llave, luego agrega/elimina si hace falta)
+        # 1 Ejecutar mirror (que ahora primero sincroniza file_name/file_date por llave, luego agrega/elimina si hace falta)
         self.mirror_file_date_file_name_from_source(df_source_credito, self.mirror_credito_path, column_key_credito, update_columns)
         self.mirror_file_date_file_name_from_source(df_source_debito, self.mirror_debito_path, column_key_debito, update_columns)
-
+        # 2 Agrega o quita filas
         self.remove_or_add_rows(df_source_debito, self.mirror_debito_path, column_key_debito, update_columns)
         self.remove_or_add_rows(df_source_credito, self.mirror_credito_path, column_key_credito, update_columns)
+        # En este momento, tenemos los mimso rows en source y mirror, y file_name/file_date actualizados
+        # 3 Actualizar las columnas de conceptos (beneficiario, categoria, grupo,
+        conceptual_columns = pd.read_excel(self.conceptos_master).columns.tolist()
 
+        excel_credit_conceptos = os.path.join(self.strategy_folder, "Conceptos temporales", "credito", "credito_corriente.xlsx")
+        excel_debito_conceptos = os.path.join(self.strategy_folder, "Conceptos temporales", "debito", "debito_corriente.xlsx")
+        self.add_conceptual_columns(self.mirror_debito_path, column_key_debito, excel_debito_conceptos, conceptual_columns)
+        self.add_conceptual_columns(self.mirror_credito_path, column_key_credito, excel_credit_conceptos, conceptual_columns)
         # Exportar a Excel al final
         print("📝 Exportando Mirror.xlsx tras actualizar ambos mirrors…")
         self.export_mirror_excel()
-    
+    def add_conceptual_columns(self, mirror_path, match_columns, excel_with_concepts, conceptual_columns):
+        """
+        Adds/updates conceptual columns from excel_with_concepts to df_mirror based on match_columns.
+        - Loads conceptos_df from Excel.
+        - Matches rows on match_columns and updates conceptual_columns in df_mirror.
+        - Adds missing columns if needed.
+        - Saves the updated mirror.
+        """
+        print(self.helper.message_print(f"\n🔄 Agregando columnas conceptuales a mirror: {os.path.basename(mirror_path)}"))
+        
+        # Load mirror
+        try:
+            df_mirror = pd.read_pickle(mirror_path)
+        except Exception as e:
+            print(f"❌ No se pudo leer el mirror '{mirror_path}': {e}")
+            return
+
+        # Load conceptos_df from Excel
+        try:
+            conceptos_df = pd.read_excel(excel_with_concepts)
+        except Exception as e:
+            print(f"❌ No se pudo leer el Excel '{excel_with_concepts}': {e}")
+            return
+
+        # Reset index
+        df_mirror = df_mirror.reset_index(drop=True)
+        conceptos_df = conceptos_df.reset_index(drop=True)
+
+        # Normalize dtypes for match_columns
+        def _normalize_string_series(ser: pd.Series) -> pd.Series:
+            ser = ser.astype('string')
+            ser = ser.str.replace(r"\s+", " ", regex=True).str.strip()
+            return ser
+
+        for col in match_columns:
+            if pd.api.types.is_datetime64_any_dtype(conceptos_df[col]):
+                conceptos_df[col] = pd.to_datetime(conceptos_df[col], errors='coerce').dt.normalize()
+                df_mirror[col] = pd.to_datetime(df_mirror[col], errors='coerce').dt.normalize()
+            elif pd.api.types.is_numeric_dtype(conceptos_df[col]):
+                conceptos_df[col] = pd.to_numeric(conceptos_df[col], errors='coerce')
+                df_mirror[col] = pd.to_numeric(df_mirror[col], errors='coerce')
+            else:
+                conceptos_df[col] = _normalize_string_series(conceptos_df[col])
+                df_mirror[col] = _normalize_string_series(df_mirror[col])
+
+        # Drop duplicates in conceptos_df based on match_columns
+        conceptos_df = conceptos_df.drop_duplicates(subset=match_columns, keep='first')
+
+        # Create composite keys for matching
+        df_mirror['_composite_key'] = df_mirror[match_columns].astype(str).agg(' | '.join, axis=1)
+        conceptos_df['_composite_key'] = conceptos_df[match_columns].astype(str).agg(' | '.join, axis=1)
+
+        # Add missing conceptual_columns to df_mirror
+        for col in conceptual_columns:
+            if col not in df_mirror.columns:
+                df_mirror[col] = None
+
+        # Merge to get conceptual values (left join on df_mirror)
+        # Merge to get conceptual values (left join on df_mirror)
+        merged = pd.merge(
+            df_mirror,
+            conceptos_df[match_columns + conceptual_columns + ['_composite_key']],
+            on='_composite_key',
+            how='left',
+            suffixes=('', '_conceptos')
+        )
+
+        # Debug: Number of matches
+        matches = merged['_composite_key'].notna().sum()
+        print(f"🔍 DEBUG - Found {matches} matching rows between Mirror and Excel.")
+
+        # Update conceptual_columns in df_mirror with non-NaN values from Excel
+        updated_cells = 0
+        for col in conceptual_columns:
+            conceptos_col = f'{col}_conceptos'
+            if conceptos_col in merged.columns:
+                mask = merged[conceptos_col].notna()  # Update if Excel value is not NaN
+                if mask.any():
+                    df_mirror.loc[mask, col] = merged.loc[mask, conceptos_col]
+                    updated_cells += mask.sum()
+
+        # Clean up
+        df_mirror = df_mirror.drop(columns=['_composite_key'], errors='ignore')
+
+        # Debug
+        print(f"🔍 DEBUG - Updated {updated_cells} conceptual cells in mirror.")
+
+        # Save updated mirror
+        df_mirror.to_pickle(mirror_path)
+        print(f"✅ Columnas conceptuales agregadas/actualizadas. Guardado en {mirror_path}")
+
+
     def remove_or_add_rows(self, df_source, mirror_path, match_columns, update_columns):
         """
         Adjusts df_mirror to have exactly the same rows as df_source based on match_columns:
@@ -426,7 +527,9 @@ def main():
     dataframes_dict['debito_corriente'] = df_debito_corriente
     dataframes_dict['debito_cerrado'] = df_debito_cerrado
 
-    Conceptos(strategy_folder, data_access).generador_de_conceptos(dataframes_dict)            
+    if Conceptos(strategy_folder, data_access).generador_de_conceptos(dataframes_dict):
+        print("✅ Proceso de generación de conceptos finalizado exitosamente.")
+    return True
 
 
 if __name__ == "__main__":

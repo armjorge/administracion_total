@@ -15,6 +15,8 @@ except ImportError:
 class DataWarehouse:
     def __init__(self, strategy_folder, data_access):
         self.strategy_folder = strategy_folder
+        self.mirror_credito_path = os.path.join(self.strategy_folder, 'mirror_credito.pkl')
+        self.mirror_debito_path = os.path.join(self.strategy_folder, 'mirror_debito.pkl')
         self.data_access = data_access
         #self.helper = Helper()
         self.generador_reportes = GeneradorReportes(self.data_access, self.strategy_folder)
@@ -211,7 +213,7 @@ class DataWarehouse:
 
         df_conceptos = pd.read_excel(conceptos_master_file)
         dataframes_dict['conceptos'] = df_conceptos
-        print(df_conceptos.head())
+        #print(df_conceptos.head())
 
         
         print(f"Folder de trabajo {self.strategy_folder}")
@@ -245,7 +247,25 @@ class DataWarehouse:
         dataframes_dict['credito_cerrado'] = df_credito_cerrado
         dataframes_dict['debito_corriente'] = df_debito_corriente
         dataframes_dict['debito_cerrado'] = df_debito_cerrado
-        self.conceptos.generador_de_conceptos(dataframes_dict)
+        conceptos_true = False
+        conceptos_true = self.conceptos.generador_de_conceptos(dataframes_dict)
+        if conceptos_true: 
+            print("✅ Proceso de generación de conceptos finalizado exitosamente. De nuevo a ETL para cargar a SQL.")
+        df_conceptos_credito = pd.read_pickle(self.mirror_credito_path)
+        df_conceptos_debito = pd.read_pickle(self.mirror_debito_path)
+
+        # Upload to SQL
+        try:
+            print("⬆️  Subiendo df_conceptos_credito a SQL...")
+            df_conceptos_credito.to_sql('credito_con_conceptos', src_engine, schema=source_schema, if_exists='replace', index=False)
+            print(f"✅ Subido df_conceptos_credito ({len(df_conceptos_credito)} filas) a {source_schema}.credito_con_conceptos")
+            
+            print("⬆️  Subiendo df_conceptos_debito a SQL...")
+            df_conceptos_debito.to_sql('debito_con_conceptos', src_engine, schema=source_schema, if_exists='replace', index=False)
+            print(f"✅ Subido df_conceptos_debito ({len(df_conceptos_debito)} filas) a {source_schema}.debito_con_conceptos")
+        except Exception as e:
+            print(f"❌ Error subiendo DataFrames a SQL: {e}")
+        
         # Esquemas destino
         raw_schema_tgt = 'raw_banorte'
         stage_schema_tgt = 'stage_banorte'
