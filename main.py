@@ -5,6 +5,7 @@ from datetime import date
 import yaml
 from datawarehouse.datawarehouse import DataWarehouse
 from utils.helpers import Helper    
+from sqlalchemy import create_engine, text
 
 class TotalManagementApp:
     def run(self):
@@ -12,7 +13,7 @@ class TotalManagementApp:
         self.initialize()
         while True:
             choice = input(
-                "Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n\t3 )Inteligencia\n\t0) para salir\n"
+                "Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n\t3 )Inteligencia \n\t4) Ejecutar SQLs\n\t0) para salir\n"
             ).strip()
             if choice == "1":
                 print(self.helper.message_print("\n🚀 Iniciando la generación de información bancaria para su posterior minería..."))                     
@@ -23,6 +24,23 @@ class TotalManagementApp:
             elif choice == "3":
                 print(self.helper.message_print("\n🚀 Iniciando el proceso ETL para la inteligencia financiera..."))
                 self.datawarehouse.etl_process()
+            elif choice == "4":
+                print(self.helper.message_print("\n🚀 Ejecutando queries"))
+                source_url = self.data_access['sql_url']
+                try:
+                    src_engine = create_engine(source_url, pool_pre_ping=True)
+                    with src_engine.connect() as conn:
+                        conn.execute(text("SELECT 1"))
+                    print("✅ Conexión a la fuente exitosa.")
+                    sql_files = [f for f in os.listdir(self.queries_folder) if f.endswith('.sql')]
+                    for file in sql_files:                 
+                        self.datawarehouse.print_query_results(src_engine, file)
+                        print(f"Encontramos consulta desde archivo {file}.")
+                except Exception as e:
+                    print(f"❌ Error conectando a la fuente: {e}")
+                    return                   
+
+
             elif choice == "0":
                 print("👋 ¡Hasta luego!")
                 break
@@ -49,6 +67,7 @@ class TotalManagementApp:
         self.reporting_folder = os.path.join(self.folder_root, "Implementación", "Estrategia")
         self.datawarehouse = DataWarehouse(self.reporting_folder, self.data_access)
         self.helper = Helper()
+        self.queries_folder = os.path.join(self.folder_root, 'queries')
 
     def initialize(self):
         """Initialize the managers."""
