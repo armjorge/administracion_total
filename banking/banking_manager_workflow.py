@@ -100,14 +100,14 @@ class BankingManager:
                         sql_url = self.data_access['sql_url']
                         self.sql_operations.update_sql(df, schema_lake, key, sql_url)
 
-                        print(f"✅ Archivo {file_path} cargado exitosamente en la tabla {key} del esquema {schema_lake}.")
+                        print(f"✅ Fuente de Datos (data source) {os.path.basename(file_path)} cargado exitosamente en la tabla {key} del esquema {schema_lake}.")
 
                     except FileNotFoundError:
                         print(f"⚠️ Archivo no encontrado: {file_path}")
                     except Exception as e:
                         print(f"❌ Error al cargar el archivo {file_path}: {e}")
-            elif choice == "3":
-                self.datawarehouse.etl_process()
+            #elif choice == "3":
+                #self.datawarehouse.etl_process()
             elif choice == "0":
             
                 print("👋 ¡Hasta luego!")

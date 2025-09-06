@@ -3,20 +3,26 @@ from banking.banking_manager_workflow import BankingManager
 from business.business_manager import BusinessManager
 from datetime import date
 import yaml
+from datawarehouse.datawarehouse import DataWarehouse
+from utils.helpers import Helper    
 
 class TotalManagementApp:
     def run(self):
         """Run the main application menu."""
         self.initialize()
-
         while True:
             choice = input(
-                "Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n\t0) para salir\n"
+                "Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n\t3 )Inteligencia\n\t0) para salir\n"
             ).strip()
             if choice == "1":
+                print(self.helper.message_print("\n🚀 Iniciando la generación de información bancaria para su posterior minería..."))                     
                 self.banking_manager.run_banking_menu()
             elif choice == "2":
+                print(self.helper.message_print("\n🚀 Iniciando la generación de partidas presupuestarias..."))                
                 self.business_manager.run_business_menu()
+            elif choice == "3":
+                print(self.helper.message_print("\n🚀 Iniciando el proceso ETL para la inteligencia financiera..."))
+                self.datawarehouse.etl_process()
             elif choice == "0":
                 print("👋 ¡Hasta luego!")
                 break
@@ -40,6 +46,9 @@ class TotalManagementApp:
         self.TODAY = date.today()
         self.banking_manager = None
         self.business_manager = None
+        self.reporting_folder = os.path.join(self.folder_root, "Implementación", "Estrategia")
+        self.datawarehouse = DataWarehouse(self.reporting_folder, self.data_access)
+        self.helper = Helper()
 
     def initialize(self):
         """Initialize the managers."""
