@@ -272,7 +272,7 @@ class DataWarehouse:
         
         sql_files = [f for f in os.listdir(self.queries_folder) if f.endswith('.sql')]
         for file in sql_files:
-            #self.print_query_results(src_engine, file)
+            self.print_query_results(src_engine, file)
             print(f"Encontramos consulta desde archivo {file}...")
 
     def union_source_conceptos_SQL(self):
@@ -428,11 +428,28 @@ class DataWarehouse:
                 print(f"🧱 Tabla {target_table} creada/actualizada.")
 
 
-        def print_query_results(self, engine, sql_file):
-            """Execute the query and print the output in terminal. The files are already tested, so we only need to run them."""
-            file_path = os.path.join(self.queries_folder, sql_file)
-            with open(file_path, 'r') as f:
-                query = f.read()
+    def print_query_results(self, engine, sql_file):
+        """Execute the query and print the output in terminal. The files are already tested, so we only need to run them."""
+        file_path = os.path.join(self.queries_folder, sql_file)
+        with open(file_path, 'r') as f:
+            content = f.read()
+        
+        # Split the file into individual queries based on comment lines starting new queries
+        queries = []
+        current_query = []
+        for line in content.split('\n'):
+            if line.strip().startswith('--') and 'New query for' in line:
+                if current_query:
+                    queries.append('\n'.join(current_query).strip())
+                    current_query = []
+            current_query.append(line)
+        if current_query:
+            queries.append('\n'.join(current_query).strip())
+        
+        # Remove empty queries
+        queries = [q for q in queries if q.strip()]
+        
+        for i, query in enumerate(queries):
             try:
                 df = pd.read_sql(text(query), engine)
                 # Replace NaN/None with empty string
@@ -444,10 +461,24 @@ class DataWarehouse:
                         formatters[col] = lambda x: f"${x:,.2f}" if x != '' else ''
                     else:
                         formatters[col] = str
-                print(f"\n📊 Results for {sql_file}:")
+                
+                # Determine friendly header based on table name in query
+                if 'credito_corriente' in query:
+                    header = "📊 Totals for Crédito Corriente (all data):"
+                elif 'credito_cerrado' in query:
+                    header = "📊 Totals for Crédito Cerrado (filtered to newest file_date):"
+                elif 'debito_corriente' in query:
+                    header = "📊 Totals for Débito Corriente (all data):"
+                elif 'debito_cerrado' in query:
+                    header = "📊 Totals for Débito Cerrado (filtered to newest file_date):"
+                else:
+                    header = f"📊 Results for {sql_file} (Query {i+1}):"
+                
+                print(f"\n{header}")
                 print(df.to_string(index=False, formatters=formatters))
             except Exception as e:
-                print(f"❌ Error executing {sql_file}: {e}")
+                print(f"❌ Error executing query {i+1} from {sql_file}: {e}")
+
 
 
 def main():
