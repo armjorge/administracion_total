@@ -21,6 +21,8 @@ class DataWarehouse:
         #self.helper = Helper()
         self.generador_reportes = GeneradorReportes(self.data_access, self.strategy_folder)
         self.conceptos = Conceptos(self.strategy_folder, self.data_access)
+        folder_root = os.getcwd()
+        self.queries_folder = os.path.join(folder_root, 'queries')
 
     def _get_table_columns(self, engine, schema: str, table: str):
         """Return ordered list of column names for a given schema.table from information_schema."""
@@ -266,114 +268,22 @@ class DataWarehouse:
         except Exception as e:
             print(f"❌ Error subiendo DataFrames a SQL: {e}")
         
-        # Esquemas destino
-        raw_schema_tgt = 'raw_banorte'
-        stage_schema_tgt = 'stage_banorte'
-        self._ensure_schema(tgt_engine, raw_schema_tgt)
-        self._ensure_schema(tgt_engine, stage_schema_tgt)
 
-        # Copiar/sincronizar tablas fuente -> destino (raw) según reglas de actualización
-        for t in (source_tables_credito + source_tables_debito):
-            self._sync_table(src_engine, tgt_engine, source_schema, t, raw_schema_tgt)
+        sql_files = [f for f in os.listdir(self.queries_folder) if f.endswith('.sql')]
+        for file in sql_files:
+            self.print_query_results(src_engine, file)
 
-        # Crear vistas unificadas por grupo con columna estado
-        self._create_union_view_with_estado(
-            tgt_engine,
-            view_schema=stage_schema_tgt,
-            view_name='credito_all',
-            raw_schema=raw_schema_tgt,
-            tables=['credito_cerrado', 'credito_corriente'],
-            estados=['cerrado', 'corriente']
-        )
-        self._create_union_view_with_estado(
-            tgt_engine,
-            view_schema=stage_schema_tgt,
-            view_name='debito_all',
-            raw_schema=raw_schema_tgt,
-            tables=['debito_cerrado', 'debito_corriente'],
-            estados=['cerrado', 'corriente']
-        )
-
-        # Comparar columnas por grupos
-        self._compare_table_groups(src_engine, source_schema, source_tables_credito, group_name="CRÉDITO")
-        self._compare_table_groups(src_engine, source_schema, source_tables_debito, group_name="DÉBITO")
-
-        # Construir/actualizar DW y marts
-        self.build_dw()
-        self.generador_reportes.generar_reporte_catalogo()
-
-    def build_dw(self):
-        """Create/refresh DW: fact table + indexes + marts (materialized views)."""
-        target_url = self.data_access['local_sql_url']
-        engine = create_engine(target_url, pool_pre_ping=True, isolation_level="AUTOCOMMIT")
-        ddl = text(
-            """
-            CREATE SCHEMA IF NOT EXISTS dw_banorte;
-            CREATE TABLE IF NOT EXISTS dw_banorte.movimientos (
-              id BIGSERIAL PRIMARY KEY,
-              tipo TEXT NOT NULL,
-              estado TEXT NOT NULL,
-              fecha DATE NOT NULL,
-              concepto TEXT,
-              abono NUMERIC(14,2),
-              cargo NUMERIC(14,2),
-              tarjeta TEXT,
-              file_date DATE,
-              file_name TEXT
-            );
-            -- Reemplazo seguro sin DROP
-            TRUNCATE TABLE dw_banorte.movimientos;
-            INSERT INTO dw_banorte.movimientos (tipo, estado, fecha, concepto, abono, cargo, tarjeta, file_date, file_name)
-            SELECT 'credito' AS tipo,
-                   estado,
-                   fecha::date,
-                   concepto,
-                   abono::numeric,
-                   cargo::numeric,
-                   tarjeta,
-                   file_date::date,
-                   file_name
-            FROM stage_banorte.credito_all
-            UNION ALL
-            SELECT 'debito'  AS tipo,
-                   estado,
-                   fecha::date,
-                   concepto,
-                   abonos::numeric     AS abono,
-                   cargos::numeric     AS cargo,
-                   NULL::text          AS tarjeta,
-                   file_date::date,
-                   file_name
-            FROM stage_banorte.debito_all;
-
-            CREATE INDEX IF NOT EXISTS idx_dw_mov_fecha       ON dw_banorte.movimientos (fecha);
-            CREATE INDEX IF NOT EXISTS idx_dw_mov_tipo_estado ON dw_banorte.movimientos (tipo, estado);
-            CREATE INDEX IF NOT EXISTS idx_dw_mov_file_date   ON dw_banorte.movimientos (file_date);
-
-            -- Materialized views
-            CREATE MATERIALIZED VIEW IF NOT EXISTS dw_banorte.mv_diario_tipo AS
-            SELECT fecha, tipo,
-                   COALESCE(SUM(abono),0) AS total_abonos,
-                   COALESCE(SUM(cargo),0) AS total_cargos
-            FROM dw_banorte.movimientos
-            GROUP BY 1,2;
-            CREATE INDEX IF NOT EXISTS idx_mv_diario_tipo_fecha ON dw_banorte.mv_diario_tipo (fecha);
-
-            CREATE MATERIALIZED VIEW IF NOT EXISTS dw_banorte.mv_mensual_estado AS
-            SELECT date_trunc('month', fecha)::date AS mes, tipo, estado,
-                   COALESCE(SUM(abono),0) AS total_abonos,
-                   COALESCE(SUM(cargo),0) AS total_cargos
-            FROM dw_banorte.movimientos
-            GROUP BY 1,2,3;
-            CREATE INDEX IF NOT EXISTS idx_mv_mensual_estado_mes ON dw_banorte.mv_mensual_estado (mes);
-            """
-        )
-        with engine.connect() as conn:
-            conn.execute(ddl)
-            # Refresh MVs after load
-            conn.execute(text("REFRESH MATERIALIZED VIEW dw_banorte.mv_diario_tipo"))
-            conn.execute(text("REFRESH MATERIALIZED VIEW dw_banorte.mv_mensual_estado"))
-        print("🏗️  DW construido/refrescado: movimientos + MVs actualizadas")
+    def print_query_results(self, engine, sql_file):
+        """Execute the query and print the output in terminal. The files are already tested, so we only need to run them."""
+        file_path = os.path.join(self.queries_folder, sql_file)
+        with open(file_path, 'r') as f:
+            query = f.read()
+        try:
+            df = pd.read_sql(text(query), engine)
+            print(f"\n📊 Results for {sql_file}:")
+            print(df.to_string(index=False))
+        except Exception as e:
+            print(f"❌ Error executing {sql_file}: {e}")
 
 
 def main():
