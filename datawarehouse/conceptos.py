@@ -3,7 +3,9 @@ import os  # Import the os module
 import yaml
 from sqlalchemy import create_engine, text
 import pandas as pd
+import numpy as np
 from glob import glob
+import numpy as np
 try:
     from utils.helpers import Helper
 except ModuleNotFoundError:
@@ -82,7 +84,8 @@ class Conceptos:
                     df_source_credito[col] = None
             df_source_credito.to_pickle(self.mirror_credito_path)
             df_mirror_credito = df_source_credito  # Ensure df_mirror_credito is defined
-        print(f"✅ Dataframes espejo creados con {len(df_mirror_debito)} filas en DÉBITO y {len(df_mirror_credito)} filas en CRÉDITO.")
+            print(f"✅ Dataframes espejo creados con {len(df_mirror_debito)} filas en DÉBITO y {len(df_mirror_credito)} filas en CRÉDITO.")
+        print("✅ Dataframes espejo ya existen localmente como pickles.")
 
     def dataframes_from_source(self, dict_dataframes):
         df_source_credito = pd.concat([
@@ -113,93 +116,287 @@ class Conceptos:
         update_columns = ['file_date', 'file_name']
         
         # Ejecutar mirror (que ahora primero sincroniza file_name/file_date por llave, luego agrega/elimina si hace falta)
-        self.mirror(df_source_credito, self.mirror_credito_path, column_key_credito, update_columns)
-        self.mirror(df_source_debito, self.mirror_debito_path, column_key_debito, update_columns)
+        self.mirror_file_date_file_name_from_source(df_source_credito, self.mirror_credito_path, column_key_credito, update_columns)
+        self.mirror_file_date_file_name_from_source(df_source_debito, self.mirror_debito_path, column_key_debito, update_columns)
+
+        self.remove_or_add_rows(df_source_debito, self.mirror_debito_path, column_key_debito, update_columns)
+        self.remove_or_add_rows(df_source_credito, self.mirror_credito_path, column_key_credito, update_columns)
+
         # Exportar a Excel al final
         print("📝 Exportando Mirror.xlsx tras actualizar ambos mirrors…")
         self.export_mirror_excel()
-
-    def mirror(self, df_source, mirror_path, match_columns, update_columns):
-        # Cargar espejo
+    
+    def remove_or_add_rows(self, df_source, mirror_path, match_columns, update_columns):
+        """
+        Adjusts df_mirror to have exactly the same rows as df_source based on match_columns:
+        - Treats rows as unique keys formed by match_columns.
+        - Removes rows from df_mirror where the key is not in df_source.
+        - Adds rows from df_source where the key is not in df_mirror (copying all columns).
+        - Adds missing columns from df_source to df_mirror.
+        - Preserves order by sorting df_mirror to match df_source's key order.
+        - Includes debug/verification to confirm exact match.
+        """
+        print(self.helper.message_print(f"\n🔄 Eliminando y agregando filas entre source y mirror: {os.path.basename(mirror_path)}"))
+        # Load mirror
         try:
             df_mirror = pd.read_pickle(mirror_path)
         except Exception as e:
             print(f"❌ No se pudo leer el mirror '{mirror_path}': {e}")
             return
 
-        # Validaciones mínimas
+        # Reset index to ensure unique indices (fixes concat error)
+        df_mirror = df_mirror.reset_index(drop=True)
+        df_source = df_source.reset_index(drop=True)
+
+        # Normalize dtypes for match_columns (similar to mirror_file_date_file_name_from_source)
+        def _normalize_string_series(ser: pd.Series) -> pd.Series:
+            ser = ser.astype('string')
+            ser = ser.str.replace(r"\s+", " ", regex=True).str.strip()
+            return ser
+
+        for col in match_columns:
+            if pd.api.types.is_datetime64_any_dtype(df_source[col]):
+                df_source[col] = pd.to_datetime(df_source[col], errors='coerce').dt.normalize()
+                df_mirror[col] = pd.to_datetime(df_mirror[col], errors='coerce').dt.normalize()
+            elif pd.api.types.is_numeric_dtype(df_source[col]):
+                df_source[col] = pd.to_numeric(df_source[col], errors='coerce')
+                df_mirror[col] = pd.to_numeric(df_mirror[col], errors='coerce')
+            else:
+                df_source[col] = _normalize_string_series(df_source[col])
+                df_mirror[col] = _normalize_string_series(df_mirror[col])
+
+        # Drop duplicates in df_source based on match_columns (keep first) and copy
+        df_source_unique = df_source.drop_duplicates(subset=match_columns, keep='first').copy()
+
+        # Create composite keys for matching
+        df_source_unique['_composite_key'] = df_source_unique[match_columns].astype(str).agg(' | '.join, axis=1)
+        df_mirror['_composite_key'] = df_mirror[match_columns].astype(str).agg(' | '.join, axis=1)
+
+        # Get sets of keys
+        source_keys = set(df_source_unique['_composite_key'])
+        mirror_keys = set(df_mirror['_composite_key'])
+
+        # Keys to add (in source but not mirror)
+        keys_to_add = source_keys - mirror_keys
+        # Keys to remove (in mirror but not source)
+        keys_to_remove = mirror_keys - source_keys
+
+        # Debug: Before changes
+        print(f"🔍 DEBUG - Before: Source has {len(source_keys)} unique keys, Mirror has {len(mirror_keys)} unique keys.")
+        print(f"🔍 DEBUG - Keys to add: {len(keys_to_add)}, Keys to remove: {len(keys_to_remove)}")
+
+        # Add missing columns from df_source
+        for col in df_source.columns:
+            if col not in df_mirror.columns:
+                df_mirror[col] = None
+
+        # Remove rows from df_mirror
+        if keys_to_remove:
+            df_mirror = df_mirror[~df_mirror['_composite_key'].isin(keys_to_remove)]
+
+        # Add rows from df_source_unique (copy all columns)
+        if keys_to_add:
+            rows_to_add = df_source_unique[df_source_unique['_composite_key'].isin(keys_to_add)]
+            df_mirror = pd.concat([df_mirror, rows_to_add], ignore_index=True, sort=False)
+
+        # Sort df_mirror to match the order of keys in df_source_unique
+        key_order = df_source_unique['_composite_key'].tolist()
+        df_mirror['_sort_order'] = df_mirror['_composite_key'].map({key: i for i, key in enumerate(key_order)})
+        df_mirror = df_mirror.sort_values('_sort_order').drop(columns=['_composite_key', '_sort_order'])
+
+        # Verification/Debug: After changes
+        df_mirror['_composite_key'] = df_mirror[match_columns].astype(str).agg(' | '.join, axis=1)
+        mirror_keys_after = set(df_mirror['_composite_key'])
+        df_mirror = df_mirror.drop(columns=['_composite_key'])
+
+        if mirror_keys_after == source_keys:
+            print(f"✅ DEBUG - Verification passed: Mirror now has exactly {len(mirror_keys_after)} unique keys matching Source.")
+        else:
+            print(f"❌ DEBUG - Verification failed: Mirror has {len(mirror_keys_after)} keys, Source has {len(source_keys)}.")
+            extra_in_mirror = mirror_keys_after - source_keys
+            extra_in_source = source_keys - mirror_keys_after
+            if extra_in_mirror:
+                print(f"🔍 DEBUG - Extra keys in Mirror: {list(extra_in_mirror)[:5]}...")  # Show first 5
+            if extra_in_source:
+                print(f"🔍 DEBUG - Missing keys in Mirror: {list(extra_in_source)[:5]}...")
+
+        # Save updated mirror
+        df_mirror.to_pickle(mirror_path)
+        print(f"✅ Mirror actualizado: {len(keys_to_add)} filas agregadas, {len(keys_to_remove)} filas eliminadas. Guardado en {mirror_path}")
+
+    def mirror_file_date_file_name_from_source(self, df_source, mirror_path, match_columns, update_columns, prefer='source_last', save=True):
+        """
+        Actualiza en el mirror (pickle) las columnas de `update_columns` (p.ej. file_name, file_date)
+        solo cuando exista una fila equivalente en df_source definida por `match_columns`.
+
+        Reglas:
+        - No agrega ni elimina filas.
+        - Si hay duplicados en df_source por la llave, se resuelven con `prefer`:
+            - 'source_last'  -> conserva la última aparición (útil si file_date crece)
+            - 'source_first' -> conserva la primera
+        - Es vectorizado (merge + np.where) y reporta celdas/filas cambiadas.
+        """
+
+        # ===== Cargar mirror =====
+        try:
+            df_mirror = pd.read_pickle(mirror_path)
+        except Exception as e:
+            print(f"❌ No se pudo leer el mirror '{mirror_path}': {e}")
+            return
+
+        # ===== Validaciones =====
         if not isinstance(df_source, pd.DataFrame):
             print("⚠️ df_source no es un DataFrame válido")
             return
-        if not all(c in df_mirror.columns for c in match_columns):
-            print("⚠️ Columnas de llave faltantes en mirror; no se puede continuar:", [c for c in match_columns if c not in df_mirror.columns])
-            return
-        if not all(c in df_source.columns for c in match_columns):
-            print("⚠️ Columnas de llave faltantes en source; no se puede continuar:", [c for c in match_columns if c not in df_source.columns])
-            return
-        if not all(c in df_mirror.columns for c in update_columns):
-            print("⚠️ Columnas a actualizar faltantes en mirror; no se puede continuar:", [c for c in update_columns if c not in df_mirror.columns])
-            return
-        if not all(c in df_source.columns for c in update_columns):
-            print("⚠️ Columnas a actualizar faltantes en source; no se puede continuar:", [c for c in update_columns if c not in df_source.columns])
-            return
-
-        side = 'CRÉDITO' if 'credito' in os.path.basename(mirror_path) else 'DÉBITO'
+        #df_mirror.info()
+        #df_source.info()
         
-        # Get unique filenames from both dataframes
+        missing_m_in_mirror = [c for c in match_columns if c not in df_mirror.columns]
+        missing_m_in_source = [c for c in match_columns if c not in df_source.columns]
+        missing_u_in_mirror  = [c for c in update_columns if c not in df_mirror.columns]
+        missing_u_in_source  = [c for c in update_columns if c not in df_source.columns]
+
+        if missing_m_in_mirror:
+            print("⚠️ Columnas de llave faltantes en mirror:", missing_m_in_mirror); return
+        if missing_m_in_source:
+            print("⚠️ Columnas de llave faltantes en source:", missing_m_in_source); return
+        if missing_u_in_mirror:
+            print("⚠️ Columnas a actualizar faltantes en mirror:", missing_u_in_mirror); return
+        if missing_u_in_source:
+            print("⚠️ Columnas a actualizar faltantes en source:", missing_u_in_source); return
+
+        side = 'CRÉDITO' if 'credito' in os.path.basename(mirror_path).lower() else 'DÉBITO'
+        updated_cells = 0
+        updated_rows = 0
+        # ===== Normalizar dtypes para llaves (evitar object vs datetime, etc.) =====
+        def _normalize_string_series(ser: pd.Series) -> pd.Series:
+            ser = ser.astype('string')  # dtype de cadenas que preserva NA
+            ser = ser.str.replace(r"\s+", " ", regex=True).str.strip()
+            return ser
+
+        for col in match_columns:
+            # Si en el SOURCE es datetime, forzamos ambos a datetime y normalizamos fecha (sin hora)
+            if pd.api.types.is_datetime64_any_dtype(df_source[col]):
+                df_source[col] = pd.to_datetime(df_source[col], errors='coerce').dt.normalize()
+                df_mirror[col] = pd.to_datetime(df_mirror[col], errors='coerce').dt.normalize()
+            # Si en el SOURCE es numérico, forzamos ambos a numéricos
+            elif pd.api.types.is_numeric_dtype(df_source[col]):
+                df_source[col] = pd.to_numeric(df_source[col], errors='coerce')
+                df_mirror[col] = pd.to_numeric(df_mirror[col], errors='coerce')
+            # En caso contrario lo tratamos como texto (normalizamos espacios)
+            else:
+                df_source[col] = _normalize_string_series(df_source[col])
+                df_mirror[col] = _normalize_string_series(df_mirror[col])
+
+        # ===== Actualizar filas con matching match_columns (incluyendo todas, no solo files_to_update) =====
         unique_filename_source = set(df_source['file_name'].dropna().unique())
         unique_filename_mirror = set(df_mirror['file_name'].dropna().unique())
-        
-        # Files in both (need to update)
         files_to_update = unique_filename_source ^ unique_filename_mirror
-        
+
         if not files_to_update:
-            print(f"[{side}] No hay archivos comunes para actualizar")
-            return
-        
-        print(f"[{side}] Archivos a actualizar: {list(files_to_update)}")
-        
-        # Process files to update only
-        for filename in files_to_update:
-            mirror_rows = df_mirror[df_mirror['file_name'] == filename].copy()
-            source_rows = df_source[df_source['file_name'] == filename].copy()
+            print(f"ℹ️ [{side}] No hay file_name desalineados entre source y mirror. Nada que actualizar por filename.")
+        else:
+            # Use all rows for matching (not filtered to files_to_update) to catch rows with same key but different file_name
+            mirror_rows = df_mirror.copy()
+            source_rows = df_source.copy()
             
-            print(f"[{side}] Actualizando filas para archivo: {filename}")
-            updated_count = 0
+            # Create composite key for matching (concatenate match_columns)
+            mirror_rows['_composite_key'] = mirror_rows[match_columns].astype(str).agg(' | '.join, axis=1)
+            source_rows['_composite_key'] = source_rows[match_columns].astype(str).agg(' | '.join, axis=1)
             
-            # Update mirror rows row by row
-            for mirror_idx, mirror_row in mirror_rows.iterrows():
-                # Get the actual index in df_mirror
-                actual_mirror_idx = df_mirror[
-                    (df_mirror['file_name'] == filename) & 
-                    (df_mirror[match_columns[0]] == mirror_row[match_columns[0]])
-                ].index
+            # Debug: Before merge
+            print(f"🔍 DEBUG [{side}] - Mirror rows: {len(mirror_rows)}, Source rows: {len(source_rows)}")
+            
+            # Merge on composite key (left join to update all mirror rows with matches in source)
+            merged = pd.merge(
+                mirror_rows.reset_index(),
+                source_rows[match_columns + update_columns + ['_composite_key']],
+                on='_composite_key',
+                how='left',
+                suffixes=('', '_source')
+            )
+            
+            # Filter to rows with a match in source
+            merged = merged[merged['_composite_key'].notna()]
+            
+            # Debug: After merge
+            print(f"🔍 DEBUG [{side}] - Merged rows with matches: {len(merged)}")
+            
+            if merged.empty:
+                print(f"ℹ️ [{side}] No matches found for update.")
+            else:
+                # Update df_mirror in place for update_columns (always update to source values for matched rows)
+                for upd_col in update_columns:
+                    source_col = f'{upd_col}_source'
+                    if source_col in merged.columns:
+                        df_mirror.loc[merged['index'], upd_col] = merged[source_col]
+                        updated_cells += len(merged)
                 
-                if len(actual_mirror_idx) > 0:
-                    actual_idx = actual_mirror_idx[0]
-                    # Create search criteria using match_columns
-                    search_criteria = True
-                    for col in match_columns:
-                        search_criteria = search_criteria & (source_rows[col] == mirror_row[col])
-                    
-                    matching_source = source_rows[search_criteria]
-                    
-                    if not matching_source.empty:
-                        # Update the row in df_mirror with values from source
-                        for update_col in update_columns:
-                            if update_col in matching_source.columns:
-                                df_mirror.loc[actual_idx, update_col] = matching_source[update_col].iloc[0]
-                                updated_count += 1
+                updated_rows = len(merged['index'].unique())
+                
+                # Debug: Update summary
+                print(f"🔍 DEBUG [{side}] - Updated cells: {updated_cells}, Updated rows: {updated_rows}")
+                
+                if updated_cells > 0 and save:
+                    df_mirror.to_pickle(mirror_path)
+                    print(f"💾 [{side}] Guardado mirror: {mirror_path}")
+
+            ##########
+            ##########
+            ##########
+            #df_mirror.to_pickle(mirror_path)
+            df_mirror = pd.read_pickle(mirror_path) 
             
-            if updated_count > 0:
-                print(f"💡 [{side}] Sincronizadas columnas {update_columns} por llave (celdas cambiadas={updated_count})")
-        
-        # Save the updated mirror
-        try:
-            df_mirror.to_pickle(mirror_path)
-            print(f"💾 Guardado: {mirror_path}")
-        except Exception as e:
-            print(f"❌ No se pudo guardar el mirror en '{mirror_path}': {e}")
+            # Get unique file_name values from both dataframes
+            mirror_filenames = set(df_mirror['file_name'].dropna().unique())
+            source_filenames = set(df_source['file_name'].dropna().unique())
+            
+            # Confirma que los grupos por file_name son los mismos
+            if mirror_filenames != source_filenames:
+                print(f"❌ Los file_name del espejo y la fuente no coinciden. No se puede continuar, para este punto ya esperábamos tener actualizado todo lo actualizable")
+                
+                # Debug: Show what didn't match
+                only_in_mirror = mirror_filenames - source_filenames
+                only_in_source = source_filenames - mirror_filenames
+                
+                print(f"🔍 DEBUG - Archivos solo en MIRROR: {sorted(only_in_mirror)}")
+                print(f"🔍 DEBUG - Archivos solo en SOURCE: {sorted(only_in_source)}")
+                
+                # Let's also see if there are matching rows between these different filenames
+                if only_in_mirror and only_in_source:
+                    print(f"🔍 DEBUG - Comparando contenido entre archivos diferentes...")
+                    for mirror_file in only_in_mirror:
+                        mirror_subset = df_mirror[df_mirror['file_name'] == mirror_file][match_columns]
+                        print(f"     Mirror file '{mirror_file}': {len(mirror_subset)} filas")
+                        
+                        for source_file in only_in_source:
+                            source_subset = df_source[df_source['file_name'] == source_file][match_columns]
+                            print(f"     Source file '{source_file}': {len(source_subset)} filas")
+                            
+                            # Check if they have the same content (excluding file_name)
+                            if len(mirror_subset) == len(source_subset):
+                                # Create composite keys for comparison
+                                mirror_keys = mirror_subset.apply(tuple, axis=1).sort_values()
+                                source_keys = source_subset.apply(tuple, axis=1).sort_values()
+                                
+                                if mirror_keys.reset_index(drop=True).equals(source_keys.reset_index(drop=True)):
+                                    print(f"     ✅ CONTENIDO IDÉNTICO entre '{mirror_file}' y '{source_file}' - El update debería haber funcionado!")
+                                else:
+                                    print(f"     ❌ Contenido diferente entre '{mirror_file}' y '{source_file}'")
+                
+                print(f"Mirror filenames: {sorted(mirror_filenames)}")
+                print(f"Source filenames: {sorted(source_filenames)}")
+
+                # ===== Resumen =====
+                print("—" * 60)
+                print(f"✅ [{side}] Resumen actualización por llave {match_columns}:")
+                #print(f"   • Celdas cambiadas: {cells_changed}")
+                #print(f"   • Filas con al menos un cambio: {rows_changed}")
+                print(f"   • Filas mirror sin match en source: {len(only_in_mirror)}")
+                print(f"   • Filas source sin match en mirror: {len(only_in_source)}")
+                print("—" * 60)            
+                return
+
 def main():
     folder_root = os.getcwd()
     strategy_folder = os.path.join(folder_root, "Implementación", "Estrategia")
