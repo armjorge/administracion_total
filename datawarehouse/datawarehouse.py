@@ -268,32 +268,186 @@ class DataWarehouse:
         except Exception as e:
             print(f"❌ Error subiendo DataFrames a SQL: {e}")
         
-
+        self.union_source_conceptos_SQL()
+        
         sql_files = [f for f in os.listdir(self.queries_folder) if f.endswith('.sql')]
         for file in sql_files:
-            self.print_query_results(src_engine, file)
+            #self.print_query_results(src_engine, file)
+            print(f"Encontramos consulta desde archivo {file}...")
+
+    def union_source_conceptos_SQL(self):
+        """
+        Batch-apply the UNION logic to build/update:
+        - banorte_conceptos.credito_corriente   (from banorte_lake.credito_corriente + credito_con_conceptos)
+        - banorte_conceptos.credito_cerrado     (from banorte_lake.credito_cerrado   + credito_con_conceptos)
+        - banorte_conceptos.debito_corriente    (from banorte_lake.debito_corriente  + debito_con_conceptos)
+        - banorte_conceptos.debito_cerrado      (from banorte_lake.debito_cerrado    + debito_con_conceptos)
+
+        IMPORTANT:
+        - Uses composite key (k_fecha, k_abono, k_cargo, k_concepto_numbers) where k_concepto_numbers extracts only digits from concepto.
+        - Adapts amount column names (abono/cargo vs abonos/cargos).
+        - **Handles optional `tarjeta` column** (present in crédito, absent in débito) by selecting `NULL::text AS tarjeta` when missing.
+        """
+        source_schema = 'banorte_lake'
+        target_schema = 'banorte_conceptos'
+
+        # (kind, state, abono_col, cargo_col)
+        tasks = [
+            ('credito', 'corriente', 'abono',  'cargo'),
+            ('credito', 'cerrado',   'abono',  'cargo'),
+            ('debito',  'corriente', 'abonos', 'cargos'),
+            ('debito',  'cerrado',   'abonos', 'cargos'),
+        ]
+
+        # Helper to check if a column exists for a relation
+        def _col_exists(engine, schema: str, table: str, column: str) -> bool:
+            q = text(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = :schema
+                AND table_name   = :table
+                AND column_name  = :column
+                LIMIT 1
+                """
+            )
+            with engine.connect() as conn:
+                row = conn.execute(q, {"schema": schema, "table": table, "column": column}).fetchone()
+            return row is not None
+
+        engine = create_engine(self.data_access['sql_url'], pool_pre_ping=True, isolation_level="AUTOCOMMIT")
+
+        with engine.connect() as conn:
+            conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS {target_schema}'))
+
+            for kind, state, ab_col, cg_col in tasks:
+                base_table      = f'{kind}_{state}'
+                conceptos_table = f'{kind}_con_conceptos'
+                target_table    = f'{target_schema}.{base_table}'
+
+                # Determine how to project `tarjeta` for each source; alias to `tarjeta` in the CTEs
+                base_has_tarjeta = _col_exists(engine, source_schema, base_table, 'tarjeta')
+                cc_has_tarjeta   = _col_exists(engine, source_schema, conceptos_table, 'tarjeta')
+
+                c_tarjeta_sel  = 'tarjeta' if base_has_tarjeta else 'NULL::text AS tarjeta'
+                cc_tarjeta_sel = 'tarjeta' if cc_has_tarjeta   else 'NULL::text AS tarjeta'
+
+                sql = f"""
+                BEGIN;
+
+                DROP TABLE IF EXISTS {target_table};
+
+                CREATE TABLE {target_table} AS
+                WITH
+                -- Base table with normalized key
+                c AS (
+                    SELECT
+                        fecha,
+                        concepto,
+                        {ab_col},
+                        {cg_col},
+                        {c_tarjeta_sel},
+                        file_date,
+                        file_name,
+                        -- keys (normalized)
+                        date(fecha)                          AS k_fecha,
+                        COALESCE({ab_col},0)::numeric(18,2)  AS k_abono,
+                        COALESCE({cg_col},0)::numeric(18,2)  AS k_cargo,
+                        regexp_replace(concepto, '[^0-9]', '', 'g') AS k_concepto_numbers
+                    FROM {source_schema}.{base_table}
+                ),
+
+                -- Enrichment table normalized and de-duplicated on the same key
+                cc_dedup AS (
+                SELECT *
+                FROM (
+                    SELECT
+                        fecha,
+                        concepto,
+                        {ab_col},
+                        {cg_col},
+                        {cc_tarjeta_sel},
+                        file_date,
+                        file_name,
+                        beneficiario,
+                        categoria,
+                        grupo,
+                        clave_presupuestal,
+                        concepto_procesado,
+                        -- keys (normalized)
+                        date(fecha)                          AS k_fecha,
+                        COALESCE({ab_col},0)::numeric(18,2)  AS k_abono,
+                        COALESCE({cg_col},0)::numeric(18,2)  AS k_cargo,
+                        regexp_replace(concepto, '[^0-9]', '', 'g') AS k_concepto_numbers,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY date(fecha),
+                                        COALESCE({ab_col},0)::numeric(18,2),
+                                        COALESCE({cg_col},0)::numeric(18,2),
+                                        regexp_replace(concepto, '[^0-9]', '', 'g')
+                            ORDER BY
+                                (CASE WHEN categoria     IS NOT NULL THEN 0 ELSE 1 END),
+                                (CASE WHEN beneficiario  IS NOT NULL THEN 0 ELSE 1 END),
+                                file_date DESC NULLS LAST,
+                                fecha     DESC NULLS LAST
+                        ) AS rn
+                    FROM {source_schema}.{conceptos_table}
+                ) t
+                WHERE rn = 1
+                )
+
+                -- Build the mirror using (k_fecha, k_abono, k_cargo, k_concepto_numbers)
+                SELECT
+                    c.fecha,
+                    c.concepto,
+                    c.{ab_col},
+                    c.{cg_col},
+                    c.tarjeta,
+                    c.file_date,
+                    c.file_name,
+                    cc.beneficiario,
+                    cc.categoria,
+                    cc.grupo,
+                    cc.clave_presupuestal,
+                    cc.concepto_procesado
+                FROM c
+                LEFT JOIN cc_dedup cc
+                ON  c.k_fecha IS NOT DISTINCT FROM cc.k_fecha
+                AND c.k_abono IS NOT DISTINCT FROM cc.k_abono
+                AND c.k_cargo IS NOT DISTINCT FROM cc.k_cargo
+                AND c.k_concepto_numbers IS NOT DISTINCT FROM cc.k_concepto_numbers
+                ;
+
+                -- Helpful indexes
+                CREATE INDEX ON {target_table} (file_date);
+                CREATE INDEX ON {target_table} (file_name);
+                CREATE INDEX ON {target_table} (categoria);
+
+                COMMIT;
+                """
+                conn.execute(text(sql))
+                print(f"🧱 Tabla {target_table} creada/actualizada.")
 
 
-    def print_query_results(self, engine, sql_file):
-        """Execute the query and print the output in terminal. The files are already tested, so we only need to run them."""
-        file_path = os.path.join(self.queries_folder, sql_file)
-        with open(file_path, 'r') as f:
-            query = f.read()
-        try:
-            df = pd.read_sql(text(query), engine)
-            # Replace NaN/None with empty string
-            df = df.fillna('')
-            # Format numeric columns as currency ($ with commas)
-            formatters = {}
-            for col in df.columns:
-                if df[col].dtype in ['float64', 'int64']:
-                    formatters[col] = lambda x: f"${x:,.2f}" if x != '' else ''
-                else:
-                    formatters[col] = str
-            print(f"\n📊 Results for {sql_file}:")
-            print(df.to_string(index=False, formatters=formatters))
-        except Exception as e:
-            print(f"❌ Error executing {sql_file}: {e}")
+        def print_query_results(self, engine, sql_file):
+            """Execute the query and print the output in terminal. The files are already tested, so we only need to run them."""
+            file_path = os.path.join(self.queries_folder, sql_file)
+            with open(file_path, 'r') as f:
+                query = f.read()
+            try:
+                df = pd.read_sql(text(query), engine)
+                # Replace NaN/None with empty string
+                df = df.fillna('')
+                # Format numeric columns as currency ($ with commas)
+                formatters = {}
+                for col in df.columns:
+                    if df[col].dtype in ['float64', 'int64']:
+                        formatters[col] = lambda x: f"${x:,.2f}" if x != '' else ''
+                    else:
+                        formatters[col] = str
+                print(f"\n📊 Results for {sql_file}:")
+                print(df.to_string(index=False, formatters=formatters))
+            except Exception as e:
+                print(f"❌ Error executing {sql_file}: {e}")
 
 
 def main():
