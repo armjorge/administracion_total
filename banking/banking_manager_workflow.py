@@ -49,7 +49,6 @@ class BankingManager:
             choice = input(f"""{Helper.message_print('¿Qué deseas hacer?')}
         1. Descargar
         2. Cargar a SQL, GoogleSheet
-        3. Estrategia y evaluación
         0. Salir
         Elige una opción: """).strip()
 
