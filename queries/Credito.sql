@@ -1,55 +1,51 @@
 -- ...existing code...
 
--- New query for banorte_conceptos.credito_corriente
+-- New query for banking_info.credito_corriente
 SELECT 
     0 AS sort_key,
     categoria, 
-    grupo, 
     SUM(abono) AS total_abono, 
     SUM(cargo) AS total_cargo
 FROM 
-    banorte_conceptos.credito_corriente
+    banking_info.credito_corriente
 GROUP BY 
-    categoria, grupo
+    categoria
 UNION ALL
 SELECT 
     1 AS sort_key,
     'Total' AS categoria, 
-    'Total' AS grupo, 
     SUM(abono) AS total_abono, 
     SUM(cargo) AS total_cargo
 FROM 
-    banorte_conceptos.credito_corriente
+    banking_info.credito_corriente
 ORDER BY 
     sort_key, 
-    categoria, 
-    grupo;
+    categoria;
 
--- New query for banorte_conceptos.credito_cerrado, filtered to the newest file_date
+-- New query for banking_info.credito_cerrado, filtered to the newest file_date
 SELECT 
     0 AS sort_key,
     categoria, 
-    grupo, 
     SUM(abono) AS total_abono, 
     SUM(cargo) AS total_cargo
 FROM 
-    banorte_conceptos.credito_cerrado
+    banking_info.credito_cerrado
 WHERE 
-    file_date = (SELECT MAX(file_date) FROM banorte_conceptos.credito_cerrado)
+    file_date = (SELECT MAX(file_date) FROM banking_info.credito_cerrado) AND
+    estado = 'cerrado'
 GROUP BY 
-    categoria, grupo
+    categoria
 UNION ALL
 SELECT 
     1 AS sort_key,
     'Total' AS categoria, 
-    'Total' AS grupo, 
     SUM(abono) AS total_abono, 
     SUM(cargo) AS total_cargo
 FROM 
-    banorte_conceptos.credito_cerrado
+    banking_info.credito_cerrado
 WHERE 
-    file_date = (SELECT MAX(file_date) FROM banorte_conceptos.credito_cerrado)
+    file_date = (SELECT MAX(file_date) FROM banking_info.credito_cerrado) AND
+    estado = 'cerrado'
 ORDER BY 
     sort_key, 
-    categoria, 
-    grupo;
+    categoria;
