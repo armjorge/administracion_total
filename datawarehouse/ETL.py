@@ -308,6 +308,7 @@ class ETL:
                             cargo NUMERIC,
                             abono NUMERIC,
                             concepto TEXT,
+                            estado TEXT,
                             beneficiario TEXT,
                             categoria TEXT,
                             grupo TEXT,
@@ -320,16 +321,16 @@ class ETL:
                 # Upsert desde crédito (cerrado + corriente). Preferencia a 'cerrado' si coincidiera llave
                 conn.execute(text(f"""
                     INSERT INTO {self.target_schema}.credito_conceptos
-                        (fecha, unic_concept, cargo, abono, concepto, beneficiario, categoria, grupo, id_presupuesto, concepto_procesado, ubicacion)
+                        (fecha, unic_concept, cargo, abono, concepto, estado, beneficiario, categoria, grupo, id_presupuesto, concepto_procesado, ubicacion)
                     SELECT DISTINCT ON (fecha, unic_concept, cargo, abono)
-                        fecha, unic_concept, cargo, abono, concepto,
+                        fecha, unic_concept, cargo, abono, concepto, estado,
                         NULL::text AS beneficiario, NULL::text AS categoria, NULL::text AS grupo,
                         NULL::text AS id_presupuesto, NULL::text AS concepto_procesado, NULL::text AS ubicacion
                     FROM (
-                        SELECT fecha, unic_concept, cargo, abono, concepto, 0 AS ord
+                        SELECT fecha, unic_concept, cargo, abono, estado, concepto, 0 AS ord
                         FROM {self.target_schema}.credito_cerrado
                         UNION ALL
-                        SELECT fecha, unic_concept, cargo, abono, concepto, 1 AS ord
+                        SELECT fecha, unic_concept, cargo, abono, estado, concepto, 1 AS ord
                         FROM {self.target_schema}.credito_corriente
                     ) s
                     ORDER BY fecha, unic_concept, cargo, abono, ord
@@ -338,16 +339,16 @@ class ETL:
                 # Upsert desde débito (cerrado + corriente)
                 conn.execute(text(f"""
                     INSERT INTO {self.target_schema}.debito_conceptos
-                        (fecha, unic_concept, cargo, abono, concepto, beneficiario, categoria, grupo, id_presupuesto, concepto_procesado, ubicacion)
+                        (fecha, unic_concept, cargo, abono, concepto, estado, beneficiario, categoria, grupo, id_presupuesto, concepto_procesado, ubicacion)
                     SELECT DISTINCT ON (fecha, unic_concept, cargo, abono)
-                        fecha, unic_concept, cargo, abono, concepto,
+                        fecha, unic_concept, cargo, abono, concepto, estado,
                         NULL::text AS beneficiario, NULL::text AS categoria, NULL::text AS grupo,
                         NULL::text AS id_presupuesto, NULL::text AS concepto_procesado, NULL::text AS ubicacion
                     FROM (
-                        SELECT fecha, unic_concept, cargo, abono, concepto, 0 AS ord
+                        SELECT fecha, unic_concept, cargo, abono, concepto, estado, 0 AS ord
                         FROM {self.target_schema}.debito_cerrado
                         UNION ALL
-                        SELECT fecha, unic_concept, cargo, abono, concepto, 1 AS ord
+                        SELECT fecha, unic_concept, cargo, abono, concepto, estado, 1 AS ord
                         FROM {self.target_schema}.debito_corriente
                     ) s
                     ORDER BY fecha, unic_concept, cargo, abono, ord

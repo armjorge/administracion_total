@@ -141,7 +141,7 @@ class Conceptos:
                     work[col] = pd.NA
 
             # Ordenar columnas: PK + concepto + columnas de enriquecimiento + resto
-            preferred = self.primary_key_columns + ['concepto'] + self.concept_columns
+            preferred = self.primary_key_columns + ['estado', 'concepto'] + self.concept_columns
             cols = [c for c in preferred if c in work.columns] + [c for c in work.columns if c not in preferred]
             work = work[cols]
 
