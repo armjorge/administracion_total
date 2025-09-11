@@ -23,6 +23,7 @@ class BankingManager:
         self.pickle_debito_cerrado = PICKLE_DEBIT_CLOSED
         self.pickle_credito_cerrado = PICKLE_CREDIT_CLOSED
         self.helper = Helper()
+        #self.ETL_alternativo = ETL(folder_root)
 
         # Pass path_tc_closed and fechas_corte to DownloaderWorkflow
         self.descargador = DownloaderWorkflow(

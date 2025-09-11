@@ -6,6 +6,11 @@ import yaml
 from datawarehouse.datawarehouse import DataWarehouse
 from utils.helpers import Helper    
 from sqlalchemy import create_engine, text
+try: 
+    from datawarehouse.ETL import ETL
+except ImportError:
+    from .datawarehouse.ETL import ETL
+
 
 class TotalManagementApp:
     def run(self):
@@ -13,7 +18,7 @@ class TotalManagementApp:
         self.initialize()
         while True:
             choice = input(
-                "Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n\t3 )Inteligencia \n\t4) Ejecutar SQLs\n\t0) para salir\n"
+                "Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n\t3) ETL en SQL \n\t5) Completar conceptos \n\t4) Ejecutar SQLs\n\t0) para salir\n"
             ).strip()
             if choice == "1":
                 print(self.helper.message_print("\n🚀 Iniciando la generación de información bancaria para su posterior minería..."))                     
@@ -23,7 +28,8 @@ class TotalManagementApp:
                 self.business_manager.run_business_menu()
             elif choice == "3":
                 print(self.helper.message_print("\n🚀 Iniciando el proceso ETL para la inteligencia financiera..."))
-                self.datawarehouse.etl_process()
+                #self.datawarehouse.etl_process()
+                self.ETL_alternativo.main()
             elif choice == "4":
                 print(self.helper.message_print("\n🚀 Ejecutando queries"))
                 source_url = self.data_access['sql_url']
@@ -68,6 +74,7 @@ class TotalManagementApp:
         self.datawarehouse = DataWarehouse(self.reporting_folder, self.data_access)
         self.helper = Helper()
         self.queries_folder = os.path.join(self.folder_root, 'queries')
+        self.ETL_alternativo = ETL(self.folder_root)
 
     def initialize(self):
         """Initialize the managers."""

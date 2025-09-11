@@ -11,6 +11,10 @@ try:
     from .conceptos import Conceptos
 except ImportError:
     from conceptos import Conceptos
+try: 
+    from .ETL import ETL
+except ImportError:
+    from ETL import ETL
 
 class DataWarehouse:
     def __init__(self, strategy_folder, data_access):
@@ -19,10 +23,10 @@ class DataWarehouse:
         self.mirror_debito_path = os.path.join(self.strategy_folder, 'mirror_debito.pkl')
         self.data_access = data_access
         #self.helper = Helper()
-        self.generador_reportes = GeneradorReportes(self.data_access, self.strategy_folder)
-        self.conceptos = Conceptos(self.strategy_folder, self.data_access)
-        folder_root = os.getcwd()
-        self.queries_folder = os.path.join(folder_root, 'queries')
+        #self.generador_reportes = GeneradorReportes(self.data_access, self.strategy_folder)
+        #self.conceptos = Conceptos(self.strategy_folder, self.data_access)
+        #folder_root = os.getcwd()
+        #self.queries_folder = os.path.join(folder_root, 'queries')
 
     def _get_table_columns(self, engine, schema: str, table: str):
         """Return ordered list of column names for a given schema.table from information_schema."""
