@@ -1,6 +1,7 @@
 import os  # Import the os module
 #from utils.helpers import Helper  # Import the Helper class
 import yaml
+import re
 from sqlalchemy import create_engine, text
 import pandas as pd
 try:
@@ -25,8 +26,8 @@ class DataWarehouse:
         #self.helper = Helper()
         #self.generador_reportes = GeneradorReportes(self.data_access, self.strategy_folder)
         #self.conceptos = Conceptos(self.strategy_folder, self.data_access)
-        #folder_root = os.getcwd()
-        #self.queries_folder = os.path.join(folder_root, 'queries')
+        folder_root = os.getcwd()
+        self.queries_folder = os.path.join(folder_root, 'queries')
 
     def _get_table_columns(self, engine, schema: str, table: str):
         """Return ordered list of column names for a given schema.table from information_schema."""
@@ -433,14 +434,13 @@ class DataWarehouse:
 
 
     def print_query_results(self, engine, sql_file):
-        """Execute the query and print the output in terminal. The files are already tested, so we only need to run them."""
         file_path = os.path.join(self.queries_folder, sql_file)
+        
         with open(file_path, 'r') as f:
             content = f.read()
-        
-        # Split the file into individual queries based on comment lines starting new queries
-        queries = []
-        current_query = []
+
+        # Split por marcador de nueva query
+        queries, current_query = [], []
         for line in content.split('\n'):
             if line.strip().startswith('--') and 'New query for' in line:
                 if current_query:
@@ -449,42 +449,86 @@ class DataWarehouse:
             current_query.append(line)
         if current_query:
             queries.append('\n'.join(current_query).strip())
-        
-        # Remove empty queries
-        queries = [q for q in queries if q.strip()]
-        
+
+        # Limpia queries vacías (solo comentarios o ; )
+        def _is_effectively_empty(sql: str) -> bool:
+            lines = []
+            for ln in sql.splitlines():
+                s = ln.strip()
+                if s.startswith('--') or s == '':
+                    continue
+                lines.append(s)
+            body = ' '.join(lines).strip().strip(';')
+            return body == ''
+
+        queries = [q for q in queries if not _is_effectively_empty(q)]
+
+        from sqlalchemy import text
+        import pandas as pd
+
         for i, query in enumerate(queries):
             try:
-                df = pd.read_sql(text(query), engine)
-                # Replace NaN/None with empty string
+                with engine.connect() as conn:
+                    result = conn.execute(text(query))
+
+                    # Caso: no devuelve filas (DDL / DML sin RETURNING)
+                    if not result.returns_rows:
+                        # Mensaje sucinto con palomita verde
+                        base_name = os.path.basename(sql_file)
+                        print(f"✅ {base_name} ejecutada")
+                        continue
+
+                    # Caso: sí devuelve filas → DataFrame y formato
+                    rows = result.fetchall()
+                    cols = result.keys()
+                    df = pd.DataFrame(rows, columns=cols)
+                    df = df.apply(pd.to_numeric, errors='ignore')
+                # Remueve sort_key si existe
+                if 'sort_key' in df.columns:
+                    df = df.drop(columns=['sort_key'])
+
+                # Reemplaza NaN/None por ''
                 df = df.fillna('')
-                # Format numeric columns as currency ($ with commas)
+
+                # Formateadores de columnas numéricas
                 formatters = {}
                 for col in df.columns:
-                    if df[col].dtype in ['float64', 'int64']:
-                        formatters[col] = lambda x: f"${x:,.2f}" if x != '' else ''
+                    if pd.api.types.is_numeric_dtype(df[col]):
+                        formatters[col] = lambda x, _col=col: f"${x:,.2f}" if pd.notna(x) else ''
                     else:
                         formatters[col] = str
-                
-                # Determine friendly header based on table name in query
-                if 'credito_corriente' in query:
-                    header = "📊 Totals for Crédito Corriente (all data):"
-                elif 'credito_cerrado' in query:
-                    header = "📊 Totals for Crédito Cerrado (filtered to newest file_date):"
-                elif 'debito_corriente' in query:
-                    header = "📊 Totals for Débito Corriente (all data):"
-                elif 'debito_cerrado' in query:
-                    header = "📊 Totals for Débito Cerrado (filtered to newest file_date):"
+
+                # Header amigable según el contenido de la query (robusto y sin falsos positivos)
+                q_lower = query.lower()
+
+                def has(pattern: str) -> bool:
+                    return re.search(pattern, q_lower) is not None
+
+                # 1) Detecta primero débito para evitar coincidencias accidentales
+                if has(r"\bdebito_corriente\b"):
+                    header = "📊 Totals for Débito Corriente:"
+                elif has(r"\bdebito_cerrado\b"):
+                    header = "📊 Totals for Débito Cerrado:"
+                # 2) Luego crédito
+                elif has(r"\bcredito_corriente\b"):
+                    header = "📊 Totals for Crédito Corriente:"
+                elif has(r"\bcredito_cerrado\b"):
+                    header = "📊 Totals for Crédito Cerrado:"
                 else:
-                    header = f"📊 Results for {sql_file} (Query {i+1}):"
-                
+                    # 3) Fallback por nombre del archivo cuando no se encuentran patrones claros
+                    file_lower = sql_file.lower()
+                    if "debito" in file_lower:
+                        header = f"📊 Results (Débito) for {sql_file} (Query {i+1}):"
+                    elif "credito" in file_lower:
+                        header = f"📊 Results (Crédito) for {sql_file} (Query {i+1}):"
+                    else:
+                        header = f"📊 Results for {sql_file} (Query {i+1}):"
+
                 print(f"\n{header}")
                 print(df.to_string(index=False, formatters=formatters))
+
             except Exception as e:
                 print(f"❌ Error executing query {i+1} from {sql_file}: {e}")
-
-
-
 def main():
     folder_root = os.getcwd()
     strategy_folder = os.path.join(folder_root, "Implementación", "Estrategia")

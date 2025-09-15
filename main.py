@@ -39,9 +39,9 @@ class TotalManagementApp:
                         conn.execute(text("SELECT 1"))
                     print("✅ Conexión a la fuente exitosa.")
                     sql_files = [f for f in os.listdir(self.queries_folder) if f.endswith('.sql')]
-                    for file in sql_files:                 
+                    for file in sql_files:
                         self.datawarehouse.print_query_results(src_engine, file)
-                        print(f"Encontramos consulta desde archivo {file}.")
+                        #print(f"Encontramos consulta desde archivo {file}.")
                 except Exception as e:
                     print(f"❌ Error conectando a la fuente: {e}")
                     return                   
@@ -70,12 +70,11 @@ class TotalManagementApp:
         self.TODAY = date.today()
         self.banking_manager = None
         self.business_manager = None
-        self.reporting_folder = os.path.join(self.folder_root, "Implementación", "Estrategia")
-        self.datawarehouse = DataWarehouse(self.reporting_folder, self.data_access)
+        self.strategy_folder = os.path.join(self.folder_root, "Implementación", "Estrategia")
+        self.datawarehouse = DataWarehouse(self.strategy_folder, self.data_access)
         self.helper = Helper()
         self.queries_folder = os.path.join(self.folder_root, 'queries')
         self.ETL_alternativo = ETL(self.folder_root)
-        self.strategy_folder = os.path.join(self.folder_root, "Implementación", "Estrategia")
         self.Conceptos = Conceptos(self.strategy_folder, self.data_access)
 
     def initialize(self):

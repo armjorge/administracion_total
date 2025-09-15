@@ -8,6 +8,8 @@ SELECT
     SUM(cargo) AS total_cargo
 FROM 
     banking_info.debito_corriente
+WHERE 
+    categoria != 'Balance 0'
 GROUP BY 
     categoria
 UNION ALL
@@ -18,6 +20,8 @@ SELECT
     SUM(cargo) AS total_cargo
 FROM 
     banking_info.debito_corriente
+WHERE 
+    categoria != 'Balance 0'
 ORDER BY 
     sort_key, 
     categoria;
@@ -32,7 +36,8 @@ FROM
     banking_info.debito_cerrado
 WHERE 
     file_date = (SELECT MAX(file_date) FROM banking_info.debito_cerrado) AND
-    estado = 'cerrado'
+    estado = 'cerrado' AND
+    categoria != 'Balance 0'
 GROUP BY 
     categoria
 UNION ALL
@@ -45,7 +50,8 @@ FROM
     banking_info.debito_cerrado
 WHERE 
     file_date = (SELECT MAX(file_date) FROM banking_info.debito_cerrado) AND
-    estado = 'cerrado'
+    estado = 'cerrado' AND
+    categoria != 'Balance 0'
 ORDER BY 
     sort_key, 
     categoria;
