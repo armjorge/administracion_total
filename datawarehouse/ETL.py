@@ -22,7 +22,7 @@ except ModuleNotFoundError:
 class ETL:
     def __init__(self, folder_root):
         self.folder_root = folder_root
-        self.strategy_folder = os.path.join(folder_root, "Implementación", "Estrategia")
+        self.strategy_folder = os.path.join(folder_root, "Estrategia")
         self.helper = Helper()
         self.mirror_credito_path = os.path.join(self.strategy_folder, 'mirror_credito.pkl')
         self.mirror_debito_path = os.path.join(self.strategy_folder, 'mirror_debito.pkl')
@@ -509,7 +509,7 @@ class ETL:
 
     
     def main(self):
-        passwords_path = os.path.join(self.folder_root, "Implementación", "Info Bancaria", 'passwords.yaml')
+        passwords_path = os.path.join(self.folder_root, 'config.yaml')
         with open(passwords_path, 'r') as f:
             self.data_access = yaml.safe_load(f)
 

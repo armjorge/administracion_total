@@ -64,3 +64,5 @@ if os.path.exists(chrome_binary_path):
     print(f"✅ Chrome binary exists at:\n{chrome_binary_path}")
 else:
     print(f"❌ Chrome binary not found at:\n{chrome_binary_path}")
+
+print("run in macos \n \tchmod +x /Users/armjorge/chrome_testing/chromedriver-mac-arm64/chromedriver")

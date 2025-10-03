@@ -532,7 +532,7 @@ class DataWarehouse:
 def main():
     folder_root = os.getcwd()
     strategy_folder = os.path.join(folder_root, "Implementación", "Estrategia")
-    passwords_path = os.path.join(folder_root, "Implementación", "Info Bancaria", 'passwords.yaml')
+    passwords_path = os.path.join(folder_root, 'config.yaml')
     with open(passwords_path, 'r') as f:
         data_access = yaml.safe_load(f)
     DataWarehouse(strategy_folder, data_access).etl_process()

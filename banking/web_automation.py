@@ -1,18 +1,19 @@
 import os
-import sys
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
-#from utils.helpers import message_print
+import platform
+
 from selenium import webdriver
+from selenium.common.exceptions import (
+    SessionNotCreatedException,
+    TimeoutException,
+    WebDriverException,
+)
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
-import platform
-import os
-from utils.helpers import Helper  # Import the Helper class
-from utils.helpers import Helper  # Import the Helper class
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+
+from utils.helpers import Helper
 
 
 class WebAutomation:
@@ -30,66 +31,108 @@ class WebAutomation:
     def chrome_driver_load(self, directory):
         """Launch Chrome with OS-specific paths and consistent configuration."""
 
-        # Detect OS
         system = platform.system()
         home = os.path.expanduser("~")
-        # Set Chrome binary and ChromeDriver paths based on OS
+
         if system == "Windows":
             chrome_binary_path = os.path.join(home, "Documents", "chrome-win64", "chrome.exe")
             chromedriver_path = os.path.join(home, "Documents", "chromedriver-win64", "chromedriver.exe")
-        elif system == "Darwin":  # macOS
-            
-            chrome_binary_path = os.path.join(home, "chrome_testing", "chrome-mac-arm64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing")
-            chromedriver_path = os.path.join(home, "chrome_testing", "chromedriver-mac-arm64", "chromedriver")
+        elif system == "Darwin":
+            machine = platform.machine().lower()
+            arch_suffix = "arm64" if "arm" in machine else "x64"
+            chrome_binary_path = os.path.join(
+                home,
+                "chrome_testing",
+                f"chrome-mac-{arch_suffix}",
+                "Google Chrome for Testing.app",
+                "Contents",
+                "MacOS",
+                "Google Chrome for Testing",
+            )
+            chromedriver_path = os.path.join(
+                home,
+                "chrome_testing",
+                f"chromedriver-mac-{arch_suffix}",
+                "chromedriver",
+            )
         else:
-            print(f"Unsupported OS: {system}")
+            print(f"❌ Unsupported OS: {system}")
             return None
 
-        # Set Chrome options
+        if not os.path.exists(chrome_binary_path) or not os.path.exists(chromedriver_path):
+            print("⚠️ Chrome o Chromedriver no encontrados. Iniciando instalación guiada...")
+            chrome_binary_path, chromedriver_path = self.helper.install_chromedriver()
+
+        if not chrome_binary_path or not chromedriver_path:
+            print("❌ No se obtuvieron rutas válidas para Chrome.")
+            return None
+
+        if not os.path.exists(chrome_binary_path) or not os.path.exists(chromedriver_path):
+            print("❌ Las rutas configuradas para Chrome/Chromedriver no existen.")
+            print(f"   Chrome: {chrome_binary_path}")
+            print(f"   Chromedriver: {chromedriver_path}")
+            return None
+
+        download_dir = os.path.abspath(directory)
+        os.makedirs(download_dir, exist_ok=True)
+
+        print(f"Usando Chrome binario: {chrome_binary_path}")
+        print(f"Usando Chromedriver: {chromedriver_path}")
+
         chrome_options = Options()
         chrome_options.binary_location = chrome_binary_path
 
         prefs = {
-            "download.default_directory": os.path.abspath(directory),
+            "download.default_directory": download_dir,
             "download.prompt_for_download": False,
             "download.directory_upgrade": True,
-            "plugins.always_open_pdf_externally": True
+            "plugins.always_open_pdf_externally": True,
         }
         chrome_options.add_experimental_option("prefs", prefs)
         chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
-        # (Optional) Further reduce noise:
+
         chrome_options.add_argument("--disable-background-networking")
         chrome_options.add_argument("--disable-client-side-phishing-detection")
         chrome_options.add_argument("--disable-component-update")
-
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("--disable-popup-blocking")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920x1080")
+        chrome_options.add_argument("--remote-allow-origins=*")
+
+        if system == "Linux":
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--no-sandbox")
+        elif system == "Windows":
+            chrome_options.add_argument("--disable-gpu")
 
         try:
-            # Initialize ChromeDriver with the correct service path
             service = Service(chromedriver_path)
             driver = webdriver.Chrome(service=service, options=chrome_options)
+            print("🚀 ChromeDriver inicializado correctamente.")
             return driver
-        except Exception as e:
-            print(f"Failed to initialize Chrome driver: {e}")
-            return None
+        except SessionNotCreatedException as exc:
+            print("❌ ChromeDriver no pudo crear la sesión")
+            print(exc)
+        except WebDriverException as exc:
+            print("❌ Error de WebDriver al iniciar ChromeDriver")
+            print(exc)
+        except Exception as exc:
+            print("❌ Error inesperado al iniciar ChromeDriver")
+            print(exc)
+
+        return None
     
     def execute_download_session(self, download_folder, archivos_faltantes, periodo):
         """Ejecuta una sesión completa de descarga"""
         if any('cerrado' in archivo for archivo in archivos_faltantes):
             print(self.helper.message_print("MES CERRADO: Débito: meses anteriores al mes actual. \nCrédito: Al último corte, dos cortes atrás. \nEn ningún caso es después del corte o del 1 de este mes al día de hoy."))
         print(f"Path del directorio de descargas en execute_download_session: {os.path.join(*download_folder.split(os.sep)[-2:])}")
-        if not self.chrome_driver_load:
-            print("❌ Driver de Chrome no disponible")
-            return False
-
         try:
             # Inicializar driver
             self.driver = self.chrome_driver_load(download_folder)
+            if not self.driver:
+                print("❌ No se pudo iniciar ChromeDriver. Revisa los mensajes anteriores.")
+                return False
 
             # Configurar acciones según los datos de acceso
             actions = self._build_actions(self.data_access)
