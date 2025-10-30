@@ -1,13 +1,6 @@
-from utils.helpers import Helper
-from .downloader_workflow import DownloaderWorkflow
 from .sheets_updater import SheetsUpdater
-from utils.helpers import Helper  # Import the Helper class
-import pandas as pd
-import os
-import pickle
-from datawarehouse.datawarehouse import DataWarehouse
-from dotenv import load_dotenv
 from Library.csv_to_sql import CSV_TO_SQL
+
 
 class BankingManager:
     def __init__(self, working_folder, data_access):
@@ -15,17 +8,12 @@ class BankingManager:
         self.data_access = data_access
         self.csv_to_sql = CSV_TO_SQL(self.working_folder, self.data_access)
 
-        # Pass path_tc_closed and fechas_corte to DownloaderWorkflow
-        #self.descargador = DownloaderWorkflow( self.working_folder, self.data_access, self.folder_root, self.path_tc_closed, self.corriente_temporal_downloads, self.fechas_corte, self.today, self.pickle_debito_cerrado, self.pickle_credito_cerrado)
-
-
-
     def run_banking_menu(self):
-        print(Helper.message_print("Bienvenido al menú bancario"))
+        print("Bienvenido al menú bancario")
         
         """Run the banking menu."""
         while True:
-            choice = input(f"""{Helper.message_print('¿Qué deseas hacer?')}
+            choice = input(f"""'¿Qué deseas hacer?'
         1. Descargar
         2. Cargar a SQL, GoogleSheet
         0. Salir

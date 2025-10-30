@@ -65,55 +65,6 @@ CREATE TABLE IF NOT EXISTS banorte_load.credito_abierto (
     PRIMARY KEY (fecha, unic_concept, cargo, abono)
 );
 
--- Generate unic_concept function
-
-CREATE OR REPLACE FUNCTION banorte_load.generate_unic_concept()
-RETURNS TRIGGER AS $$
-DECLARE
-    extracted TEXT;
-BEGIN
-    IF NEW.unic_concept IS NULL OR NEW.unic_concept = '' THEN
-        -- Intentar extraer números
-        extracted := regexp_replace(NEW.concepto, '[^0-9]', '', 'g');
-
-        -- Si no hay números, extraer solo letras
-        IF extracted = '' THEN
-            extracted := regexp_replace(NEW.concepto, '[^a-zA-Z]', '', 'g');
-        END IF;
-
-        -- Asignar el resultado limpio
-        NEW.unic_concept := extracted;
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Generate Triggers for each table
-
--- debito_cerrado
-CREATE TRIGGER trg_generate_unic_concept_debito_cerrado
-BEFORE INSERT ON banorte_load.debito_cerrado
-FOR EACH ROW
-EXECUTE FUNCTION banorte_load.generate_unic_concept();
-
--- debito_abierto
-CREATE TRIGGER trg_generate_unic_concept_debito_abierto
-BEFORE INSERT ON banorte_load.debito_abierto
-FOR EACH ROW
-EXECUTE FUNCTION banorte_load.generate_unic_concept();
-
--- credito_cerrado
-CREATE TRIGGER trg_generate_unic_concept_credito_cerrado
-BEFORE INSERT ON banorte_load.credito_cerrado
-FOR EACH ROW
-EXECUTE FUNCTION banorte_load.generate_unic_concept();
-
--- credito_abierto
-CREATE TRIGGER trg_generate_unic_concept_credito_abierto
-BEFORE INSERT ON banorte_load.credito_abierto
-FOR EACH ROW
-EXECUTE FUNCTION banorte_load.generate_unic_concept();
-
 -----------------
 ---CUTOFF DAYS---
 -----------------
@@ -195,7 +146,3 @@ AFTER INSERT ON banorte_load.cutoff_years
 FOR EACH ROW
 EXECUTE FUNCTION banorte_load.generate_cutoff_trigger();
 
--- Insertar 2025 
-
-INSERT INTO banorte_load.cutoff_years (year_value) VALUES (2025)
-ON CONFLICT DO NOTHING;

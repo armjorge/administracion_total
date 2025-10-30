@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from utils.helpers import Helper  # Import the Helper class
 
 
 class SheetsUpdater:
@@ -26,7 +25,6 @@ class SheetsUpdater:
         self.working_folder = working_folder
         self.data_access = data_access
         self.spreadsheet = None
-        self.helper = Helper()
         # Inicializar conexión
         self._setup_connection()
     

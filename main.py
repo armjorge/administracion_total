@@ -1,10 +1,12 @@
 import os
 import yaml
-from sqlalchemy import create_engine, text
-from banking.banking_manager_workflow import BankingManager
-from utils.helpers import Helper    
-from utils.helpers import Helper
-from Library.concept_filing import CONCEPT_FILING
+from Library.banking_manager_workflow import BankingManager
+import subprocess
+import sys
+import colorama
+from Library.initialize import INITIALIZE 
+
+
 class TotalManagementApp:
     def run(self):
         """Run the main application menu."""
@@ -13,37 +15,22 @@ class TotalManagementApp:
                 "Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n\t3) Conceptos \n\t4) Ejecutar SQLs\n\t0) para salir\n"
             ).strip()
             if choice == "1":
-                print(self.helper.message_print("\n🚀 Iniciando la ƒgeneración de información bancaria para su posterior minería..."))                     
+                print("\n🚀 Iniciando la ƒgeneración de información bancaria para su posterior minería...")                     
                 self.banking_manager.run_banking_menu()
             elif choice == "2":
-                print(self.helper.message_print("\n🚀 Iniciando la generación de partidas presupuestarias..."))                
+                print("\n🚀 Iniciando la generación de partidas presupuestarias...")
                 self.business_manager.run_business_menu()
             elif choice == "3":
-                print(self.helper.message_print("\n🚀 Abriendo clasificador de conceptos Banorte en navegador..."))
-                import subprocess
-                import sys
+                print("\n🚀 Abriendo clasificador de conceptos Banorte en navegador...")
+
                 streamlit_path = os.path.join('.', "Library", "concept_filing.py")
                 try:
                     subprocess.run([sys.executable, "-m", "streamlit", "run", streamlit_path], check=True)
                 except Exception as e:
                     print(f"❌ Error al ejecutar Streamlit: {e}")
             elif choice == "4":
-                print(self.helper.message_print("\n🚀 Ejecutando queries"))
-                source_url = self.data_access['sql_url']
-                try:
-                    src_engine = create_engine(source_url, pool_pre_ping=True)
-                    with src_engine.connect() as conn:
-                        conn.execute(text("SELECT 1"))
-                    print("✅ Conexión a la fuente exitosa.")
-                    sql_files = [f for f in os.listdir(self.queries_folder) if f.endswith('.sql')]
-                    for file in sql_files:
-                        self.datawarehouse.print_query_results(src_engine, file)
-                        #print(f"Encontramos consulta desde archivo {file}.")
-                except Exception as e:
-                    print(f"❌ Error conectando a la fuente: {e}")
-                    return                   
-
-
+                print("\n🚀 Ejecutando queries")
+                print("Ejecutar queries")
             elif choice == "0":
                 print("👋 ¡Hasta luego!")
                 break
@@ -51,19 +38,13 @@ class TotalManagementApp:
                 print("\n⚠️ Elige una opción válida (1, 2, o 0). Inténtalo de nuevo.\n")
 
     def __init__(self):
-        # Load .env for the root path (same as csv_to_sql.py)
-        env_path = os.path.join(os.path.dirname(__file__), '.env')
-        with open(env_path, 'r') as file:
-            env_data = yaml.safe_load(file)  # Use yaml.safe_load if .env is YAML; otherwise, use dotenv.load_dotenv() and os.getenv()
-        
-        # Set working_folder as the root (do NOT append 'Info Bancaria' here)
-        self.working_folder = env_data['Main_path']  # e.g., '/Users/armjorge/Documents/Repositorios/administracion_total'
-        
+        self.root_folder = os.path.dirname(os.path.abspath(__file__))
+        self.working_folder = INITIALIZE().initialize(self.root_folder)
+        print(f"Working folder set to: {self.working_folder}")
         # Load config.yaml (same as csv_to_sql.py)
         yaml_path = os.path.join(self.working_folder, 'config.yaml')
         with open(yaml_path, 'r') as file:
             self.data_access = yaml.safe_load(file)
-        self.helper = Helper()
         self.banking_manager = BankingManager(self.working_folder, self.data_access)
 
 if __name__ == "__main__":

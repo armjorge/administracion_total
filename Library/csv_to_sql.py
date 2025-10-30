@@ -1,5 +1,4 @@
 import os
-import re 
 from sqlalchemy import create_engine
 import yaml
 from datetime import date, datetime
@@ -10,27 +9,67 @@ from psycopg2.extras import execute_values
 from pandas._libs.missing import NAType
 from pandas._libs.tslibs.nattype import NaTType
 
+try:
+    from Library.initialize import INITIALIZE
+except ModuleNotFoundError:
+    # fallback if running inside the Library folder
+    from initialize import INITIALIZE
+from dotenv import load_dotenv
+
+
 class CSV_TO_SQL:
     def csv_to_sql_process(self):
-        # get Accounts from SQL server. 
-        connexion = None
+        # 1️⃣ Conectar
+        connexion = self.sql_conexion(self.data_access['sql_workflow']).connect()
+        if connexion is None:
+            print("❌ No se pudo establecer conexión con SQL Server.")
+            return False
+
+        # 2️⃣ Intentar leer tabla de cuentas
         try:
-            connexion = self.sql_conexion(self.data_access['sql_workflow']).connect()
-            if connexion is None:
-                print("❌ No se pudo establecer conexión con SQL Server.")
-                return False
-
-            self.df_accounts = pd.read_sql("SELECT * FROM banorte_load.accounts", connexion)
-
-            if self.df_accounts.empty:
-                print("⚠️ La tabla banorte_load.accounts está vacía. No es posible continuar con el proceso.")
-                return False
-
-            print(f"✅ {len(self.df_accounts)} cuentas cargadas desde SQL Server.")
-            print(self.df_accounts[['account_number']].head())
+            query = "SELECT * FROM banorte_load.accounts"
+            self.df_accounts = pd.read_sql(query, connexion)
+            print(f"✅ Loaded accounts: {len(self.df_accounts)} registros.")
 
         except Exception as e:
-            print(f"❌ Error ejecutando la consulta SQL: {e}")
+            error_msg = str(e)
+
+            # Si la tabla no existe
+            if "UndefinedTable" in error_msg or "does not exist" in error_msg:
+                print("⚠️ Table 'banorte_load.accounts' not found.")
+                print("🛠️ Running INITIALIZE().initialize_postgres_db() to create schema and tables...")
+                initializer = INITIALIZE()
+                initializer.initialize_postgres_db(self.data_access, self.working_folder)
+
+                # Reintento
+                try:
+                    self.df_accounts = pd.read_sql("SELECT * FROM banorte_load.accounts", connexion)
+                    print(f"✅ Loaded accounts after creation: {len(self.df_accounts)} registros.")
+                except Exception as e2:
+                    print(f"❌ Error after trying to create schema/tables: {e2}")
+                    return False
+
+            # Si el esquema no existe
+            elif "InvalidSchemaName" in error_msg or "schema" in error_msg.lower():
+                print("⚠️ Schema 'banorte_load' not found.")
+                print("🛠️ Running INITIALIZE().initialize_postgres_db() to create schema and tables...")
+                initializer = INITIALIZE()
+                initializer.initialize_postgres_db(self.data_access, self.working_folder)
+
+                # Reintento
+                try:
+                    self.df_accounts = pd.read_sql("SELECT * FROM banorte_load.accounts", connexion)
+                    print(f"✅ Loaded accounts after creation: {len(self.df_accounts)} registros.")
+                except Exception as e2:
+                    print(f"❌ Error after trying to create schema/tables: {e2}")
+                    return False
+            else:
+                print(f"❌ Error ejecutando la consulta SQL: {e}")
+                return False
+
+        # 3️⃣ Validar contenido de cuentas
+        if self.df_accounts.empty:
+            print("⚠️ No hay registros en 'banorte_load.accounts'. Captura cuentas antes de comenzar.")
             return False
         
         # Mapping columns for both debit and credit
@@ -298,9 +337,10 @@ class CSV_TO_SQL:
         
 if __name__ == "__main__":
     env_path = os.path.join(os.path.dirname(__file__), '..', '.env')
-    with open(env_path, 'r') as file:
-        env_data = yaml.safe_load(file)
-    working_folder = env_data['Main_path']
+    folder_name = "MAIN_PATH"
+    if os.path.exists(env_path):
+        load_dotenv(dotenv_path=env_path)
+        working_folder = os.getenv(folder_name)    
     yaml_path = os.path.join(working_folder, 'config.yaml')
     with open(yaml_path, 'r') as file:
         data_access = yaml.safe_load(file)
