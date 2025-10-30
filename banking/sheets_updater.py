@@ -7,6 +7,21 @@ from utils.helpers import Helper  # Import the Helper class
 
 
 class SheetsUpdater:
+    @staticmethod
+    def _get_gspread_client(working_folder):
+        """Devuelve una conexión persistente a Google Sheets"""
+        import gspread
+        from oauth2client.service_account import ServiceAccountCredentials
+        if not hasattr(SheetsUpdater, "_cached_client"):
+            scope = [
+                'https://spreadsheets.google.com/feeds',
+                'https://www.googleapis.com/auth/drive'
+            ]
+            json_path = os.path.join(working_folder, 'armjorgeSheets.json')
+            creds = ServiceAccountCredentials.from_json_keyfile_name(json_path, scope)
+            SheetsUpdater._cached_client = gspread.authorize(creds)
+        return SheetsUpdater._cached_client
+
     def __init__(self, working_folder, data_access):
         self.working_folder = working_folder
         self.data_access = data_access
@@ -29,7 +44,7 @@ class SheetsUpdater:
             creds = ServiceAccountCredentials.from_json_keyfile_name(json_path, scope)
             
             # Autorizar cliente
-            client = gspread.authorize(creds)
+            client = self._get_gspread_client(self.working_folder)
             url = self.data_access['url_google_sheet']
             self.spreadsheet = client.open_by_url(url)
             
@@ -53,13 +68,13 @@ class SheetsUpdater:
             worksheet.clear()
             
             # Procesar fechas si existen
-            df_processed = dataframe.copy()
+            df_processed = self._process_dataframe_for_sheets(dataframe)
             
             # Mostrar información de debug para fechas
             #self._debug_date_conversion(sheet_name, dataframe, df_processed)
             
             # Preparar datos para subida
-            values = [df_processed.columns.tolist()] + df_processed.values.tolist()
+            values = [df_processed.columns.tolist()] + df_processed.astype(str).values.tolist()
             
             # Subir datos
             self.spreadsheet.values_update(
