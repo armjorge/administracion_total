@@ -18,10 +18,7 @@ class BankingManager:
         # Pass path_tc_closed and fechas_corte to DownloaderWorkflow
         #self.descargador = DownloaderWorkflow( self.working_folder, self.data_access, self.folder_root, self.path_tc_closed, self.corriente_temporal_downloads, self.fechas_corte, self.today, self.pickle_debito_cerrado, self.pickle_credito_cerrado)
 
-        self.sheets_updater = SheetsUpdater(
-            self.working_folder,
-            self.data_access,
-        )
+
 
     def run_banking_menu(self):
         print(Helper.message_print("Bienvenido al menú bancario"))
@@ -42,6 +39,11 @@ class BankingManager:
                 print("\nCargar a SQL\n")
                 dict_dataframes = self.csv_to_sql.csv_to_sql_process()      
                 print("\nCargar a GoogleSheets\n")
+
+                self.sheets_updater = SheetsUpdater(
+                    self.working_folder,
+                    self.data_access,
+                )                
                 self.sheets_updater.update_multiple_sheets(dict_dataframes)
 
 

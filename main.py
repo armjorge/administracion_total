@@ -1,28 +1,33 @@
 import os
-from banking.banking_manager_workflow import BankingManager
-from datetime import date
 import yaml
-from datawarehouse.datawarehouse import DataWarehouse
-from utils.helpers import Helper    
 from sqlalchemy import create_engine, text
-from dotenv import load_dotenv
+from banking.banking_manager_workflow import BankingManager
+from utils.helpers import Helper    
 from utils.helpers import Helper
-
+from Library.concept_filing import CONCEPT_FILING
 class TotalManagementApp:
     def run(self):
         """Run the main application menu."""
         while True:
             choice = input(
-                "Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n\t\t3) Ejecutar SQLs\n\t0) para salir\n"
+                "Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n\t3) Conceptos \n\t4) Ejecutar SQLs\n\t0) para salir\n"
             ).strip()
             if choice == "1":
-                print(self.helper.message_print("\n🚀 Iniciando la generación de información bancaria para su posterior minería..."))                     
+                print(self.helper.message_print("\n🚀 Iniciando la ƒgeneración de información bancaria para su posterior minería..."))                     
                 self.banking_manager.run_banking_menu()
             elif choice == "2":
                 print(self.helper.message_print("\n🚀 Iniciando la generación de partidas presupuestarias..."))                
                 self.business_manager.run_business_menu()
-
             elif choice == "3":
+                print(self.helper.message_print("\n🚀 Abriendo clasificador de conceptos Banorte en navegador..."))
+                import subprocess
+                import sys
+                streamlit_path = os.path.join('.', "Library", "concept_filing.py")
+                try:
+                    subprocess.run([sys.executable, "-m", "streamlit", "run", streamlit_path], check=True)
+                except Exception as e:
+                    print(f"❌ Error al ejecutar Streamlit: {e}")
+            elif choice == "4":
                 print(self.helper.message_print("\n🚀 Ejecutando queries"))
                 source_url = self.data_access['sql_url']
                 try:
