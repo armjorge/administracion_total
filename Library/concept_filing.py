@@ -4,7 +4,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import os
 from sqlalchemy import create_engine
-
+from dotenv import load_dotenv
 import yaml
 
 
@@ -177,9 +177,10 @@ class CONCEPT_FILING:
         
 if __name__ == "__main__":
     env_path = os.path.join(os.path.dirname(__file__), '..', '.env')
-    with open(env_path, 'r') as file:
-        env_data = yaml.safe_load(file)
-    working_folder = env_data['Main_path']
+    folder_name = "MAIN_PATH"
+    if os.path.exists(env_path):
+        load_dotenv(dotenv_path=env_path)
+        working_folder = os.getenv(folder_name)    
     yaml_path = os.path.join(working_folder, 'config.yaml')
     with open(yaml_path, 'r') as file:
         data_access = yaml.safe_load(file)

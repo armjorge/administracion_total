@@ -6,6 +6,8 @@ from datetime import date
 import pandas as pd  
 from urllib.parse import urlparse
 import psycopg2
+import sys
+import subprocess
 
 class INITIALIZE:
     def __init__(self):
@@ -36,21 +38,7 @@ class INITIALIZE:
             print(f"❌ Error creating raw PostgreSQL connection: {e}")
             return False
 
-        # Crear esquema y tabla base a mano
-        try:
-            print(f"{Fore.YELLOW}🧩 Ensuring schema and base table exist...{Style.RESET_ALL}")
-            cur.execute("CREATE SCHEMA IF NOT EXISTS banorte_load;")
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS banorte_load.accounts (
-                    account_number TEXT PRIMARY KEY,
-                    type TEXT NOT NULL CHECK (type IN ('credit', 'debit'))
-                );
-            """)
-            print(f"{Fore.GREEN}✅ Schema and base table 'accounts' verified.{Style.RESET_ALL}")
-        except Exception as e:
-            print(f"{Fore.RED}❌ Error creating schema/base table: {e}{Style.RESET_ALL}")
-            raw_conn.close()
-            return False
+
 
         # Leer el resto del script
         file_path = os.path.dirname(__file__)
@@ -120,6 +108,13 @@ class INITIALIZE:
 
         raw_conn.close()
         print(f"{Fore.GREEN}🎯 Initialization complete and connection closed.{Style.RESET_ALL}")
+
+        streamlit_path = os.path.join(file_path, "concept_filing.py")
+        try:
+            subprocess.run([sys.executable, "-m", "streamlit", "run", streamlit_path], check=True)
+        except Exception as e:
+            print(f"❌ Error al ejecutar Streamlit: {e}")
+
         return True
         
     def initialize(self, root_folder):
