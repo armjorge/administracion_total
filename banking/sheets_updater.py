@@ -101,35 +101,8 @@ class SheetsUpdater:
     def update_multiple_sheets(self, dataframes_dict):
         print("📂 Cargando DataFrames y actualizando Google Sheets...")
         
-        loaded_dataframes = {}
-        
-        for key, path in dataframes_dict.items():
-            try:
-                # Cargar el DataFrame según la extensión del archivo
-                if path.endswith('.csv'):
-                    df = pd.read_csv(path)
-                elif path.endswith('.xlsx'):
-                    df = pd.read_excel(path)
-                elif path.endswith('.pkl'):
-                    df = pd.read_pickle(path)
-                    df= self.helper.corrige_fechas(df, 'Fecha')
-                    df= self.helper.corrige_fechas(df, 'file_date')
-                    for col in ['Fecha', 'file_date']:
-                        if col in df.columns:
-                            df[col] = df[col].astype(str)                                         
-                else:
-                    print(f"⚠️ Formato de archivo no soportado: {path}")
-                    continue
-                
-                # Limpiar columnas y preparar el DataFrame
-                df.columns = df.columns.str.replace('.', '_').str.replace(' ', '_').str.lower()
-                loaded_dataframes[key] = df
-                print(key, df.columns)
-                print(f"✅ {key}: DataFrame cargado desde {path} ({df.shape[0]} filas)")
-            
-            except Exception as e:
-                print(f"❌ Error al cargar el archivo {path}: {e}")
-        
+        loaded_dataframes = dataframes_dict
+    
         for data_type, df in loaded_dataframes.items():
             if df is not None and not df.empty:
                 sheet_name = data_type
