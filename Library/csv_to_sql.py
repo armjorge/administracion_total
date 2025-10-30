@@ -78,14 +78,13 @@ class CSV_TO_SQL:
         primary_keys = ['fecha', 'unique_concept', 'cargo', 'abono']
 
         # CLOSED STEPS
-
         # Generate closed dataframes to upload
         df_debit_closed = self.get_dataframes_to_upload(self.closed_folder, 'BANORTE_debit_headers',  {'debit': 'cerrado'})
         df_credit_closed = self.get_dataframes_to_upload(self.closed_folder, 'BANORTE_credit_headers',  {'credit': 'cerrado'})
         # Column normalization to set query ready
         df_debit_closed = self.column_normalization(df_debit_closed, mapping_debito)
         df_credit_closed = self.column_normalization(df_credit_closed, mapping_credito)
-
+        # CURRENT STEPS
         # Generate current dataframes to upload
         df_debit_current = self.get_dataframes_to_upload(self.current_folder, 'BANORTE_debit_headers',  {'debit': 'abierto'})
         df_credit_current = self.get_dataframes_to_upload(self.current_folder, 'BANORTE_credit_headers',  {'credit': 'abierto'})
@@ -122,12 +121,27 @@ class CSV_TO_SQL:
 
     def get_dataframes_to_upload(self, folder, header, estado):
         df_generated = pd.DataFrame()
-    
+
         expected_columns = self.data_access[header] + ['cuenta']
+
+        # 1️⃣ Detect files based on estado
         if list(estado.values())[0] == 'cerrado':
             csv_files = glob.glob(os.path.join(folder, '*.csv'))
         elif list(estado.values())[0] == 'abierto':
             csv_files = [f for f in glob.glob(os.path.join(folder, '*.csv')) if self.get_file_date(f) == self.today]
+        else:
+            csv_files = []
+
+        # 2️⃣ Handle case where no files are found
+        if not csv_files:
+            print(f"⚠️ No CSV files found in {folder} for estado={list(estado.values())[0]}")
+            # Return an empty dataframe with expected columns (and add the ones used later)
+            df_empty = pd.DataFrame(columns=expected_columns + [
+                'Fecha', 'unique_concept', 'estado', 'file_name', 'file_date', 'saldo'
+            ])
+            return df_empty
+
+        # 3️⃣ Process files normally
         for file in csv_files:
             try:
                 df_file = pd.read_csv(file)
@@ -142,6 +156,7 @@ class CSV_TO_SQL:
             else:
                 print(f"⚠️ No se encontró número de cuenta en {filename}, saltando archivo.")
                 continue
+
             file_date = self.get_file_date(file)
 
             if list(df_file.columns) == expected_columns:
@@ -154,20 +169,27 @@ class CSV_TO_SQL:
                         return digits
                     letters = ''.join(filter(str.isalpha, val_str))
                     return letters
-                
+
                 df_file['Fecha'] = df_file['Fecha'].apply(self.parse_fecha)
                 df_file['unique_concept'] = df_file['Concepto'].apply(extract_unique_concept)
                 df_file['estado'] = list(estado.values())[0]
                 df_file['file_name'] = filename
                 df_file['file_date'] = file_date
+
                 if list(estado.keys())[0] == 'credit':
                     df_file['saldo'] = np.nan
+
                 df_generated = pd.concat([df_generated, df_file], ignore_index=True)
             else:
-                #print(f"No columns match, skipping file {filename}")
                 continue
-        return df_generated
 
+        # 4️⃣ If still empty after processing
+        if df_generated.empty:
+            df_generated = pd.DataFrame(columns=expected_columns + [
+                'Fecha', 'unique_concept', 'estado', 'file_name', 'file_date', 'saldo'
+            ])
+
+        return df_generated
 
     def upsert_dataframe(self, conn, df: pd.DataFrame, schema: str, table_name: str, primary_keys: list, overwrite_all: bool = False):
         df = df.copy()

@@ -6,7 +6,7 @@ import os
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
 import yaml
-
+from urllib.parse import urlparse
 
 class CONCEPT_FILING:
 
@@ -15,11 +15,6 @@ class CONCEPT_FILING:
         self.data_access = data_access 
 
     def run_streamlit_interface(self):
-        import streamlit as st
-        import pandas as pd
-        import psycopg2
-        from urllib.parse import urlparse
-
         # 1) Parse DB URL from self.data_access['sql_workflow']
         sql_url = self.data_access['sql_workflow']
         parsed = urlparse(sql_url)
@@ -40,11 +35,21 @@ class CONCEPT_FILING:
 
         # 3) Streamlit UI
         st.set_page_config(page_title="Banorte Conceptos", layout="wide")
-        # Nuevo selector de vista
-        vista = st.sidebar.radio("Seleccionar vista:", ["Clasificador de conceptos", "Catálogo de categorías", "Catálogo de beneficiarios"])
+
+        # Añadimos la nueva vista
+        vista = st.sidebar.radio(
+            "Seleccionar vista:",
+            [
+                "Clasificador de conceptos",
+                "Catálogo de categorías",
+                "Catálogo de beneficiarios",
+                "Catálogo de cuentas"
+            ]
+        )
 
         schema = "banorte_load"
 
+        # ========== CLASIFICADOR DE CONCEPTOS ==========
         if vista == "Clasificador de conceptos":
             st.title("🏦 Clasificador de Conceptos Banorte")
             tipo = st.sidebar.radio("Seleccionar tipo de movimientos:", ["Débito", "Crédito"])
@@ -52,29 +57,38 @@ class CONCEPT_FILING:
             table_name = "debito_conceptos" if tipo == "Débito" else "credito_conceptos"
 
             # 4) Fetch data (usar columnas reales y llaves existentes)
-            query = f"""
-            SELECT fecha, unique_concept, concepto, cuenta, estado,
-                   cargo, abono, category_group, category_subgroup, beneficiario
-            FROM "{schema}"."{table_name}"
-            ORDER BY fecha DESC
-            LIMIT 100;
-            """
-            df = pd.read_sql(query, conn)
+            try:
+                query = f"""
+                SELECT fecha, unique_concept, concepto, cuenta, estado,
+                       cargo, abono, category_group, category_subgroup, beneficiario
+                FROM "{schema}"."{table_name}"
+                ORDER BY fecha DESC
+                LIMIT 100;
+                """
+                df = pd.read_sql(query, conn)
+            except Exception:
+                df = pd.DataFrame()
 
-            # 5) Tablas de referencia reales
-            df_cat = pd.read_sql(f'SELECT DISTINCT "group", subgroup FROM "{schema}".category;', conn)
-            df_benef = pd.read_sql(f'SELECT nombre FROM "{schema}".beneficiarios;', conn)
+            try:
+                df_cat = pd.read_sql(f'SELECT DISTINCT "group", subgroup FROM "{schema}".category;', conn)
+            except Exception:
+                df_cat = pd.DataFrame(columns=["group", "subgroup"])
+
+            try:
+                df_benef = pd.read_sql(f'SELECT nombre FROM "{schema}".beneficiarios;', conn)
+            except Exception:
+                df_benef = pd.DataFrame(columns=["nombre"])
 
             # 6) UI principal
             st.markdown("### Registros disponibles")
-            st.dataframe(df, use_container_width=True, height=400)
+            if df.empty:
+                st.info("No hay registros disponibles para mostrar.")
+                return
+            else:
+                st.dataframe(df, use_container_width=True, height=400)
 
             st.markdown("---")
             st.markdown("### ✏️ Actualizar clasificación")
-
-            if df.empty:
-                st.warning("No hay registros para editar.")
-                return
 
             selected_index = st.number_input(
                 "Selecciona el índice de fila a editar",
@@ -84,7 +98,6 @@ class CONCEPT_FILING:
 
             st.write(f"**Concepto:** {selected_row['concepto']} ({selected_row['unique_concept']})")
 
-            # Mostrar detalles adicionales del registro seleccionado
             st.markdown(
                 f"""
                 **Fecha:** {selected_row['fecha']}  
@@ -95,7 +108,6 @@ class CONCEPT_FILING:
                 unsafe_allow_html=True
             )
 
-            # Opciones de grupo y subgrupo (category)
             grupos = sorted(df_cat['group'].dropna().unique().tolist())
             current_group = selected_row.get("category_group", None)
             group = st.selectbox("Grupo", options=grupos,
@@ -109,14 +121,12 @@ class CONCEPT_FILING:
                                     index=subgrupos_filtrados.index(current_subgroup)
                                     if current_subgroup in subgrupos_filtrados else 0)
 
-            # Beneficiarios
             beneficiarios = [''] + sorted(df_benef['nombre'].dropna().unique().tolist())
             current_benef = selected_row.get("beneficiario", "")
             benef = st.selectbox("Beneficiario", options=beneficiarios,
                                  index=beneficiarios.index(current_benef)
                                  if current_benef in beneficiarios else 0)
 
-            # 7) Guardar cambios
             if st.button("💾 Guardar cambios"):
                 if not group or not subgroup:
                     st.warning("⚠️ Debes seleccionar un grupo y un subgrupo.")
@@ -136,9 +146,13 @@ class CONCEPT_FILING:
                         conn.commit()
                     st.success("✅ Clasificación actualizada correctamente.")
 
+        # ========== CATÁLOGO DE CATEGORÍAS ==========
         elif vista == "Catálogo de categorías":
             st.title("📘 Catálogo de Categorías")
-            df_cat = pd.read_sql(f'SELECT * FROM "{schema}".category ORDER BY "group", subgroup;', conn)
+            try:
+                df_cat = pd.read_sql(f'SELECT * FROM "{schema}".category ORDER BY "group", subgroup;', conn)
+            except Exception:
+                df_cat = pd.DataFrame(columns=["group", "subgroup"])
             st.dataframe(df_cat, use_container_width=True)
             st.markdown("### ➕ Agregar nueva categoría")
             new_group = st.text_input("Group")
@@ -146,27 +160,65 @@ class CONCEPT_FILING:
             if st.button("Agregar categoría"):
                 if new_group and new_subgroup:
                     with conn.cursor() as cur:
-                        cur.execute(f'INSERT INTO "{schema}".category ("group", subgroup) VALUES (%s, %s) ON CONFLICT DO NOTHING;', (new_group, new_subgroup))
+                        cur.execute(
+                            f'INSERT INTO "{schema}".category ("group", subgroup) VALUES (%s, %s) ON CONFLICT DO NOTHING;',
+                            (new_group, new_subgroup)
+                        )
                         conn.commit()
                     st.success("✅ Categoría agregada correctamente.")
                 else:
                     st.warning("⚠️ Ingresa ambos campos.")
 
+        # ========== CATÁLOGO DE BENEFICIARIOS ==========
         elif vista == "Catálogo de beneficiarios":
             st.title("📗 Catálogo de Beneficiarios")
-            df_benef = pd.read_sql(f'SELECT * FROM "{schema}".beneficiarios ORDER BY nombre;', conn)
+            try:
+                df_benef = pd.read_sql(f'SELECT * FROM "{schema}".beneficiarios ORDER BY nombre;', conn)
+            except Exception:
+                df_benef = pd.DataFrame(columns=["nombre"])
             st.dataframe(df_benef, use_container_width=True)
             st.markdown("### ➕ Agregar nuevo beneficiario")
             new_benef = st.text_input("Nombre del beneficiario")
             if st.button("Agregar beneficiario"):
                 if new_benef:
                     with conn.cursor() as cur:
-                        cur.execute(f'INSERT INTO "{schema}".beneficiarios (nombre) VALUES (%s) ON CONFLICT DO NOTHING;', (new_benef,))
+                        cur.execute(
+                            f'INSERT INTO "{schema}".beneficiarios (nombre) VALUES (%s) ON CONFLICT DO NOTHING;',
+                            (new_benef,)
+                        )
                         conn.commit()
                     st.success("✅ Beneficiario agregado correctamente.")
                 else:
                     st.warning("⚠️ El nombre no puede estar vacío.")
 
+        # ========== CATÁLOGO DE CUENTAS ==========
+        elif vista == "Catálogo de cuentas":
+            st.title("💳 Catálogo de Cuentas")
+            try:
+                df_accounts = pd.read_sql(
+                    f'SELECT * FROM "{schema}".accounts ORDER BY account_number;',
+                    conn
+                )
+            except Exception:
+                df_accounts = pd.DataFrame(columns=["account_number", "type"])
+
+            st.dataframe(df_accounts, use_container_width=True)
+            st.markdown("### ➕ Agregar nueva cuenta")
+
+            new_account = st.text_input("Número de cuenta")
+            new_type = st.selectbox("Tipo", ["debit", "credit"])
+
+            if st.button("Agregar cuenta"):
+                if new_account:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            f'INSERT INTO "{schema}".accounts (account_number, type) VALUES (%s, %s) ON CONFLICT DO NOTHING;',
+                            (new_account, new_type)
+                        )
+                        conn.commit()
+                    st.success("✅ Cuenta agregada correctamente.")
+                else:
+                    st.warning("⚠️ El número de cuenta no puede estar vacío.")
     def sql_conexion(self, sql_url):
         try:
             engine = create_engine(sql_url)

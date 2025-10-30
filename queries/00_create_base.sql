@@ -19,8 +19,8 @@ CREATE TABLE IF NOT EXISTS banorte_load.debito_cerrado (
     file_name TEXT,
     estado TEXT CHECK (estado IN ('cerrado', 'abierto')),
     cuenta TEXT REFERENCES banorte_load.accounts(account_number),
-    unic_concept TEXT,
-    PRIMARY KEY (fecha, unic_concept, cargo, abono)
+    unique_concept TEXT,
+    PRIMARY KEY (fecha, unique_concept, cargo, abono)
 );
 
 CREATE TABLE IF NOT EXISTS banorte_load.debito_abierto (
@@ -33,8 +33,8 @@ CREATE TABLE IF NOT EXISTS banorte_load.debito_abierto (
     file_name TEXT,
     estado TEXT CHECK (estado IN ('cerrado', 'abierto')),
     cuenta TEXT REFERENCES banorte_load.accounts(account_number),
-    unic_concept TEXT,
-    PRIMARY KEY (fecha, unic_concept, cargo, abono)
+    unique_concept TEXT,
+    PRIMARY KEY (fecha, unique_concept, cargo, abono)
 );
 
 CREATE TABLE IF NOT EXISTS banorte_load.credito_cerrado (
@@ -47,8 +47,8 @@ CREATE TABLE IF NOT EXISTS banorte_load.credito_cerrado (
     file_name TEXT,
     estado TEXT CHECK (estado IN ('cerrado', 'abierto')),
     cuenta TEXT REFERENCES banorte_load.accounts(account_number),
-    unic_concept TEXT,
-    PRIMARY KEY (fecha, unic_concept, cargo, abono)
+    unique_concept TEXT,
+    PRIMARY KEY (fecha, unique_concept, cargo, abono)
 );
 
 CREATE TABLE IF NOT EXISTS banorte_load.credito_abierto (
@@ -61,8 +61,8 @@ CREATE TABLE IF NOT EXISTS banorte_load.credito_abierto (
     file_name TEXT,
     estado TEXT CHECK (estado IN ('cerrado', 'abierto')),
     cuenta TEXT REFERENCES banorte_load.accounts(account_number),
-    unic_concept TEXT,
-    PRIMARY KEY (fecha, unic_concept, cargo, abono)
+    unique_concept TEXT,
+    PRIMARY KEY (fecha, unique_concept, cargo, abono)
 );
 
 -----------------
