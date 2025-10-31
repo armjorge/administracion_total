@@ -1,0 +1,49 @@
+
+BANORTE_month_free_headers:
+  - Fecha de operación
+  - Tasa anual
+  - Importe inicial
+  - Importe pendiente
+  - Concepto
+  - Pagos pendientes
+  - Mensualidad
+
+BANORTE_credit_headers:
+  - Fecha
+  - Concepto
+  - Abono
+  - Cargo
+  - Tarjeta
+
+BANORTE_debit_headers:
+  - Fecha
+  - Concepto
+  - Cargos
+  - Abonos
+  - Saldos
+
+mapping_debito_banorte:
+  Fecha: fecha
+  Concepto: concepto
+  Cargos: cargo
+  Abonos: abono
+  Saldos: saldo
+  file_date: file_date
+  file_name: file_name
+  estado: estado
+  cuenta: cuenta
+  unique_concept: unique_concept
+  period: period
+
+mapping_credito_banorte:
+  Fecha: fecha
+  Concepto: concepto
+  Cargo: cargo
+  Abono: abono
+  saldo: saldo
+  file_date: file_date
+  file_name: file_name
+  estado: estado
+  cuenta: cuenta
+  unique_concept: unique_concept
+  period: period
