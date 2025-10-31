@@ -124,12 +124,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Dummy table to record years
+-- Table to record years needed for cutoff days generation
 CREATE TABLE IF NOT EXISTS banorte_load.cutoff_years (
     year_value INT PRIMARY KEY
 );
 
--- Crear función del trigger (corregida)
+-- Functino to call populate_cutoff_days
 CREATE OR REPLACE FUNCTION banorte_load.generate_cutoff_trigger()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -138,7 +138,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Crear el trigger
+-- Trigger populate_cutoff_days
 DROP TRIGGER IF EXISTS trg_generate_cutoff_days ON banorte_load.cutoff_years;
 
 CREATE TRIGGER trg_generate_cutoff_days
@@ -146,3 +146,136 @@ AFTER INSERT ON banorte_load.cutoff_years
 FOR EACH ROW
 EXECUTE FUNCTION banorte_load.generate_cutoff_trigger();
 
+-- ===========================================
+-- Enriched Data Model with Sync & Audit Logic
+-- ===========================================
+
+-- 🔹 Tabla de categorías
+CREATE TABLE IF NOT EXISTS banorte_load.category (
+    id SERIAL PRIMARY KEY,
+    "group" TEXT NOT NULL,
+    subgroup TEXT NOT NULL,
+    CONSTRAINT category_unique_pair UNIQUE ("group", subgroup)
+);
+
+-- 🔹 Tabla de beneficiarios
+CREATE TABLE IF NOT EXISTS banorte_load.beneficiaries (
+    id SERIAL PRIMARY KEY,
+    nombre TEXT UNIQUE NOT NULL
+);
+
+-- ===========================================
+-- Tablas enriquecidas
+-- ===========================================
+
+-- 🔹 Créditos
+CREATE TABLE IF NOT EXISTS banorte_load.credito_conceptos (
+    fecha DATE NOT NULL,
+    unique_concept TEXT NOT NULL,
+    cargo NUMERIC(14,2),
+    abono NUMERIC(14,2),
+    concepto TEXT,
+    cuenta TEXT,
+    estado TEXT,
+    category_group TEXT,
+    category_subgroup TEXT,
+    beneficiario TEXT,
+    updated_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (fecha, unique_concept, cargo, abono),
+    FOREIGN KEY (category_group, category_subgroup)
+        REFERENCES banorte_load.category("group", subgroup)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    FOREIGN KEY (beneficiario)
+        REFERENCES banorte_load.beneficiaries(nombre)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+);
+
+-- 🔹 Débitos
+CREATE TABLE IF NOT EXISTS banorte_load.debito_conceptos (
+    fecha DATE NOT NULL,
+    unique_concept TEXT NOT NULL,
+    cargo NUMERIC(14,2),
+    abono NUMERIC(14,2),
+    concepto TEXT,
+    cuenta TEXT,
+    estado TEXT,
+    category_group TEXT,
+    category_subgroup TEXT,
+    beneficiario TEXT,
+    updated_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (fecha, unique_concept, cargo, abono),
+    FOREIGN KEY (category_group, category_subgroup)
+        REFERENCES banorte_load.category("group", subgroup)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    FOREIGN KEY (beneficiario)
+        REFERENCES banorte_load.beneficiaries(nombre)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+);
+
+-- ===========================================
+-- Función de sincronización con control de redundancia y auditoría
+-- ===========================================
+
+CREATE OR REPLACE FUNCTION banorte_load.sync_conceptos()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Solo ejecutar si es una inserción o si el estado cambió
+    IF (TG_OP = 'INSERT') OR (TG_OP = 'UPDATE' AND NEW.estado IS DISTINCT FROM OLD.estado) THEN
+
+        -- Créditos
+        IF TG_TABLE_NAME IN ('credito_abierto', 'credito_cerrado') THEN
+            INSERT INTO banorte_load.credito_conceptos (
+                fecha, unique_concept, cargo, abono, concepto, cuenta, estado, updated_at
+            )
+            VALUES (
+                NEW.fecha, NEW.unique_concept, NEW.cargo, NEW.abono, NEW.concepto, NEW.cuenta, NEW.estado, NOW()
+            )
+            ON CONFLICT (fecha, unique_concept, cargo, abono)
+            DO UPDATE SET 
+                estado = EXCLUDED.estado,
+                updated_at = NOW();
+
+        -- Débitos
+        ELSIF TG_TABLE_NAME IN ('debito_abierto', 'debito_cerrado') THEN
+            INSERT INTO banorte_load.debito_conceptos (
+                fecha, unique_concept, cargo, abono, concepto, cuenta, estado, updated_at
+            )
+            VALUES (
+                NEW.fecha, NEW.unique_concept, NEW.cargo, NEW.abono, NEW.concepto, NEW.cuenta, NEW.estado, NOW()
+            )
+            ON CONFLICT (fecha, unique_concept, cargo, abono)
+            DO UPDATE SET 
+                estado = EXCLUDED.estado,
+                updated_at = NOW();
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ===========================================
+-- Triggers para sincronización automática
+-- ===========================================
+
+-- Créditos
+CREATE TRIGGER trg_sync_credito_abierto
+AFTER INSERT OR UPDATE ON banorte_load.credito_abierto
+FOR EACH ROW EXECUTE FUNCTION banorte_load.sync_conceptos();
+
+CREATE TRIGGER trg_sync_credito_cerrado
+AFTER INSERT OR UPDATE ON banorte_load.credito_cerrado
+FOR EACH ROW EXECUTE FUNCTION banorte_load.sync_conceptos();
+
+-- Débitos
+CREATE TRIGGER trg_sync_debito_abierto
+AFTER INSERT OR UPDATE ON banorte_load.debito_abierto
+FOR EACH ROW EXECUTE FUNCTION banorte_load.sync_conceptos();
+
+CREATE TRIGGER trg_sync_debito_cerrado
+AFTER INSERT OR UPDATE ON banorte_load.debito_cerrado
+FOR EACH ROW EXECUTE FUNCTION banorte_load.sync_conceptos();
