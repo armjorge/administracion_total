@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS banorte_load.debito_cerrado (
     estado TEXT CHECK (estado IN ('cerrado', 'abierto')),
     cuenta TEXT REFERENCES banorte_load.accounts(account_number),
     unique_concept TEXT,
+    period TEXT DEFAULT NULL,
     PRIMARY KEY (fecha, unique_concept, cargo, abono)
 );
 
@@ -34,6 +35,7 @@ CREATE TABLE IF NOT EXISTS banorte_load.debito_abierto (
     estado TEXT CHECK (estado IN ('cerrado', 'abierto')),
     cuenta TEXT REFERENCES banorte_load.accounts(account_number),
     unique_concept TEXT,
+    period TEXT DEFAULT NULL,
     PRIMARY KEY (fecha, unique_concept, cargo, abono)
 );
 
@@ -48,6 +50,7 @@ CREATE TABLE IF NOT EXISTS banorte_load.credito_cerrado (
     estado TEXT CHECK (estado IN ('cerrado', 'abierto')),
     cuenta TEXT REFERENCES banorte_load.accounts(account_number),
     unique_concept TEXT,
+    period TEXT DEFAULT NULL,
     PRIMARY KEY (fecha, unique_concept, cargo, abono)
 );
 
@@ -62,6 +65,7 @@ CREATE TABLE IF NOT EXISTS banorte_load.credito_abierto (
     estado TEXT CHECK (estado IN ('cerrado', 'abierto')),
     cuenta TEXT REFERENCES banorte_load.accounts(account_number),
     unique_concept TEXT,
+    period TEXT DEFAULT NULL,
     PRIMARY KEY (fecha, unique_concept, cargo, abono)
 );
 
@@ -297,3 +301,103 @@ FOR EACH ROW EXECUTE FUNCTION banorte_load.sync_conceptos();
 CREATE OR REPLACE TRIGGER trg_sync_debito_cerrado
 AFTER INSERT OR UPDATE ON banorte_load.debito_cerrado
 FOR EACH ROW EXECUTE FUNCTION banorte_load.sync_conceptos();
+
+-- 1️⃣ Función genérica para extraer periodo del file_name de todas las tablas
+CREATE OR REPLACE FUNCTION banorte_load.set_period_from_filename()
+RETURNS TRIGGER AS $$
+DECLARE
+    extracted_period TEXT;
+BEGIN
+    -- Extraer patrón AAAA-MM si existe
+    extracted_period := substring(NEW.file_name FROM '([0-9]{4}-[0-9]{2})');
+
+    -- Asignar sólo si period está vacío y el formato es válido
+    IF NEW.period IS NULL AND extracted_period ~ '^[0-9]{4}-[0-9]{2}$' THEN
+        NEW.period := extracted_period;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 2️⃣ Aplicar a DEBITO_CERRADO
+DROP TRIGGER IF EXISTS trg_set_period_debito_cerrado ON banorte_load.debito_cerrado;
+CREATE TRIGGER trg_set_period_debito_cerrado
+BEFORE INSERT OR UPDATE ON banorte_load.debito_cerrado
+FOR EACH ROW
+EXECUTE FUNCTION banorte_load.set_period_from_filename();
+
+-- 3️⃣ Aplicar a CREDITO_CERRADO
+DROP TRIGGER IF EXISTS trg_set_period_credito_cerrado ON banorte_load.credito_cerrado;
+CREATE TRIGGER trg_set_period_credito_cerrado
+BEFORE INSERT OR UPDATE ON banorte_load.credito_cerrado
+FOR EACH ROW
+EXECUTE FUNCTION banorte_load.set_period_from_filename();
+
+-----------------------------------------
+-- Generate historical cutoff periods per account
+-----------------------------------------
+
+-- 1️⃣ Table (allow multiple rows per account_number + period)
+CREATE TABLE IF NOT EXISTS banorte_load.account_cutoffs (
+    account_number TEXT REFERENCES banorte_load.accounts(account_number),
+    type TEXT NOT NULL CHECK (type IN ('credit', 'debit')),
+    cutoff_period TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (account_number, cutoff_period)
+);
+
+-- 2️⃣ Function to populate all historical cutoff periods
+CREATE OR REPLACE FUNCTION banorte_load.refresh_account_cutoffs()
+RETURNS VOID AS $$
+BEGIN
+    INSERT INTO banorte_load.account_cutoffs (account_number, type, cutoff_period, updated_at)
+    SELECT 
+        a.account_number,
+        a.type,
+        d.periodo AS cutoff_period,
+        NOW()
+    FROM 
+        banorte_load.accounts a
+    JOIN 
+        banorte_load.cutoff_days d
+        ON (
+            (a.type = 'credit' AND d.fecha < CURRENT_DATE)
+            OR
+            (a.type = 'debit' AND date_trunc('month', d.fecha) < date_trunc('month', CURRENT_DATE))
+        )
+    ON CONFLICT (account_number, cutoff_period)
+    DO UPDATE SET
+        updated_at = NOW();  -- refresh timestamp if already exists
+END;
+$$ LANGUAGE plpgsql;
+
+-- 3️⃣ Enable pg_cron if not installed
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+-- 4️⃣ Schedule job daily at 00:05 AM
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM cron.job WHERE jobname = 'update_account_cutoffs_daily'
+    ) THEN
+        PERFORM cron.schedule(
+            'update_account_cutoffs_daily',
+            '5 0 * * *',  -- every day at 00:05
+            $$SELECT banorte_load.refresh_account_cutoffs();$$
+        );
+    END IF;
+END;
+$$;
+
+
+-----------------------------------------
+-- ✅ Now each account gets one row per past cutoff period
+-----------------------------------------
+
+-- 5️⃣ Initial execution (populate immediately)
+SELECT banorte_load.refresh_account_cutoffs();
+
+-----------------------------------------
+-- ✅ pg_cron now keeps account_cutoffs updated daily
+-----------------------------------------

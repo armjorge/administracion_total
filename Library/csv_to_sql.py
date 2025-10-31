@@ -8,6 +8,7 @@ import numpy as np
 from psycopg2.extras import execute_values
 from pandas._libs.missing import NAType
 from pandas._libs.tslibs.nattype import NaTType
+from dateutil.relativedelta import relativedelta
 
 try:
     from Library.initialize import INITIALIZE
@@ -77,22 +78,17 @@ class CSV_TO_SQL:
         mapping_credito = self.data_access['mapping_credito_banorte']
         primary_keys = ['fecha', 'unique_concept', 'cargo', 'abono']
 
-        # CLOSED STEPS
+        # CLOSED DATAFRAMES
         # Generate closed dataframes to upload
         df_debit_closed = self.get_dataframes_to_upload(self.closed_folder, 'BANORTE_debit_headers',  {'debit': 'cerrado'})
         df_credit_closed = self.get_dataframes_to_upload(self.closed_folder, 'BANORTE_credit_headers',  {'credit': 'cerrado'})
-        # Column normalization to set query ready
-        df_debit_closed = self.column_normalization(df_debit_closed, mapping_debito)
-        df_credit_closed = self.column_normalization(df_credit_closed, mapping_credito)
-        # CURRENT STEPS
+
+        # CURRENT DATAFRAMES
         # Generate current dataframes to upload
         df_debit_current = self.get_dataframes_to_upload(self.current_folder, 'BANORTE_debit_headers',  {'debit': 'abierto'})
         df_credit_current = self.get_dataframes_to_upload(self.current_folder, 'BANORTE_credit_headers',  {'credit': 'abierto'})
-        # Column normalization to set query ready
-        df_debit_current = self.column_normalization(df_debit_current, mapping_debito)
-        df_credit_current = self.column_normalization(df_credit_current, mapping_credito)
-
-        # Save uploaded to excel         
+        
+       # Save uploaded to excel         
         excel_output = os.path.join(os.path.expanduser("~"), "Downloads", "Banorte_SQL_upload_Data.xlsx")
         with pd.ExcelWriter(excel_output) as writer:
             df_debit_closed.to_excel(writer, sheet_name='Debit_Closed', index=False)
@@ -100,6 +96,15 @@ class CSV_TO_SQL:
             df_debit_current.to_excel(writer, sheet_name='Debit_Current', index=False)
             df_credit_current.to_excel(writer, sheet_name='Credit_Current', index=False)
         print(f"✅ DataFrames exported to Excel at {excel_output}")
+
+        # Column normalization to set query ready
+        df_debit_closed = self.column_normalization(df_debit_closed, mapping_debito)
+        df_credit_closed = self.column_normalization(df_credit_closed, mapping_credito)
+        # Column normalization to set query ready
+        df_debit_current = self.column_normalization(df_debit_current, mapping_debito)
+        df_credit_current = self.column_normalization(df_credit_current, mapping_credito)
+
+ 
 
 
         # Upload closed dataframes to SQL
@@ -175,6 +180,16 @@ class CSV_TO_SQL:
                 df_file['estado'] = list(estado.values())[0]
                 df_file['file_name'] = filename
                 df_file['file_date'] = file_date
+
+                # Generate period column 
+                key, value = list(estado.items())[0]  # Ej. ('debit', 'abierto')
+
+                if value == 'abierto':
+                    if key == 'debit':
+                        df_file['period'] = self.today.strftime('%Y-%m')
+                    elif key == 'credit':
+                        next_month = self.today + relativedelta(months=+1)
+                        df_file['period'] = next_month.strftime('%Y-%m')
 
                 if list(estado.keys())[0] == 'credit':
                     df_file['saldo'] = np.nan
