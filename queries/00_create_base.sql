@@ -217,17 +217,30 @@ CREATE TABLE IF NOT EXISTS banorte_load.debito_conceptos (
 );
 
 -- ===========================================
--- Función de sincronización con control de redundancia y auditoría
+-- Función de sincronización 
 -- ===========================================
 
 CREATE OR REPLACE FUNCTION banorte_load.sync_conceptos()
 RETURNS TRIGGER AS $$
+DECLARE
+    cuenta_tipo TEXT;
 BEGIN
+    -- Obtener tipo de cuenta desde la tabla accounts
+    SELECT type INTO cuenta_tipo
+    FROM banorte_load.accounts
+    WHERE account_number = NEW.cuenta;
+
+    -- Evitar procesamiento si no existe cuenta o tipo no definido
+    IF cuenta_tipo IS NULL THEN
+        RAISE NOTICE '⚠️ Cuenta % no encontrada en tabla accounts. Registro ignorado.', NEW.cuenta;
+        RETURN NEW;
+    END IF;
+
     -- Solo ejecutar si es una inserción o si el estado cambió
     IF (TG_OP = 'INSERT') OR (TG_OP = 'UPDATE' AND NEW.estado IS DISTINCT FROM OLD.estado) THEN
 
-        -- Créditos
-        IF TG_TABLE_NAME IN ('credito_abierto', 'credito_cerrado') THEN
+        -- Créditos → Solo si la cuenta es tipo "credit"
+        IF TG_TABLE_NAME IN ('credito_abierto', 'credito_cerrado') AND cuenta_tipo = 'credit' THEN
             INSERT INTO banorte_load.credito_conceptos (
                 fecha, unique_concept, cargo, abono, concepto, cuenta, estado, updated_at
             )
@@ -239,8 +252,8 @@ BEGIN
                 estado = EXCLUDED.estado,
                 updated_at = NOW();
 
-        -- Débitos
-        ELSIF TG_TABLE_NAME IN ('debito_abierto', 'debito_cerrado') THEN
+        -- Débitos → Solo si la cuenta es tipo "debit"
+        ELSIF TG_TABLE_NAME IN ('debito_abierto', 'debito_cerrado') AND cuenta_tipo = 'debit' THEN
             INSERT INTO banorte_load.debito_conceptos (
                 fecha, unique_concept, cargo, abono, concepto, cuenta, estado, updated_at
             )
@@ -251,6 +264,11 @@ BEGIN
             DO UPDATE SET 
                 estado = EXCLUDED.estado,
                 updated_at = NOW();
+
+        ELSE
+            -- Si la cuenta no coincide con el tipo esperado, ignoramos
+            RAISE NOTICE '⚠️ Registro ignorado: cuenta % pertenece a tipo %, pero proviene de tabla %',
+                NEW.cuenta, cuenta_tipo, TG_TABLE_NAME;
         END IF;
     END IF;
 
@@ -259,23 +277,23 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ===========================================
--- Triggers para sincronización automática
+-- Triggers de sincronización automática
 -- ===========================================
 
 -- Créditos
-CREATE TRIGGER trg_sync_credito_abierto
+CREATE OR REPLACE TRIGGER trg_sync_credito_abierto
 AFTER INSERT OR UPDATE ON banorte_load.credito_abierto
 FOR EACH ROW EXECUTE FUNCTION banorte_load.sync_conceptos();
 
-CREATE TRIGGER trg_sync_credito_cerrado
+CREATE OR REPLACE TRIGGER trg_sync_credito_cerrado
 AFTER INSERT OR UPDATE ON banorte_load.credito_cerrado
 FOR EACH ROW EXECUTE FUNCTION banorte_load.sync_conceptos();
 
 -- Débitos
-CREATE TRIGGER trg_sync_debito_abierto
+CREATE OR REPLACE TRIGGER trg_sync_debito_abierto
 AFTER INSERT OR UPDATE ON banorte_load.debito_abierto
 FOR EACH ROW EXECUTE FUNCTION banorte_load.sync_conceptos();
 
-CREATE TRIGGER trg_sync_debito_cerrado
+CREATE OR REPLACE TRIGGER trg_sync_debito_cerrado
 AFTER INSERT OR UPDATE ON banorte_load.debito_cerrado
 FOR EACH ROW EXECUTE FUNCTION banorte_load.sync_conceptos();
