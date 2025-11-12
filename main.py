@@ -5,14 +5,14 @@ import subprocess
 import sys
 import colorama
 from Library.initialize import INITIALIZE 
-
+from Library.mongo_db_process import MONGO_DB_PROCESS
 
 class TotalManagementApp:
     def run(self):
         """Run the main application menu."""
         while True:
             choice = input(
-                "Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n\t3) Conceptos \n\t4) Ejecutar SQLs\n\t0) para salir\n"
+                "Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n\t3) Conceptos \n\t4) Recuperar estados de cuenta\n\t0) para salir\n"
             ).strip()
             if choice == "1":
                 print("\n🚀 Iniciando la ƒgeneración de información bancaria para su posterior minería...")                     
@@ -22,15 +22,16 @@ class TotalManagementApp:
                 self.business_manager.run_business_menu()
             elif choice == "3":
                 print("\n🚀 Abriendo clasificador de conceptos Banorte en navegador...")
-
                 streamlit_path = os.path.join('.', "Library", "concept_filing.py")
                 try:
                     subprocess.run([sys.executable, "-m", "streamlit", "run", streamlit_path], check=True)
                 except Exception as e:
                     print(f"❌ Error al ejecutar Streamlit: {e}")
+
             elif choice == "4":
-                print("\n🚀 Ejecutando queries")
-                print("Ejecutar queries")
+                MONGO_DB_PROCESS(self.working_folder, self.data_access).csv_to_sql_process()
+
+
             elif choice == "0":
                 print("👋 ¡Hasta luego!")
                 break

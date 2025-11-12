@@ -75,7 +75,7 @@ class CONCEPT_FILING:
                 df_cat = pd.DataFrame(columns=["group", "subgroup"])
 
             try:
-                df_benef = pd.read_sql(f'SELECT nombre FROM "{schema}".beneficiarios;', conn)
+                df_benef = pd.read_sql(f'SELECT nombre FROM "{schema}".beneficiaries;', conn)
             except Exception:
                 df_benef = pd.DataFrame(columns=["nombre"])
 
@@ -173,7 +173,7 @@ class CONCEPT_FILING:
         elif vista == "Catálogo de beneficiarios":
             st.title("📗 Catálogo de Beneficiarios")
             try:
-                df_benef = pd.read_sql(f'SELECT * FROM "{schema}".beneficiarios ORDER BY nombre;', conn)
+                df_benef = pd.read_sql(f'SELECT * FROM "{schema}".beneficiaries ORDER BY nombre;', conn)
             except Exception:
                 df_benef = pd.DataFrame(columns=["nombre"])
             st.dataframe(df_benef, use_container_width=True)
@@ -183,7 +183,7 @@ class CONCEPT_FILING:
                 if new_benef:
                     with conn.cursor() as cur:
                         cur.execute(
-                            f'INSERT INTO "{schema}".beneficiarios (nombre) VALUES (%s) ON CONFLICT DO NOTHING;',
+                            f'INSERT INTO "{schema}".beneficiaries (nombre) VALUES (%s) ON CONFLICT DO NOTHING;',
                             (new_benef,)
                         )
                         conn.commit()

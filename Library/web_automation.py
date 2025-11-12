@@ -1,6 +1,5 @@
 import os
 import platform
-
 from selenium import webdriver
 from selenium.common.exceptions import (
     SessionNotCreatedException,
@@ -12,22 +11,26 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+from datetime import date
 
-from Library.helpers import Helper
-
+try:
+    from Library.helpers import Helper
+except ModuleNotFoundError:
+    # fallback if running inside the Library folder
+    from helpers import Helper
 
 class WebAutomation:
-    def __init__(self, data_access, today, path_tc_closed, working_folder):
+    def __init__(self, working_folder, data_access):
         self.driver = None
         self.timeout = 20
-        self.data_access = data_access
-        self.helper = Helper()
-        self.today = today
-        self.path_tc_closed = path_tc_closed
+        self.helper = Helper()        
+        self.today = date.today()
         self.working_folder = working_folder
-        # Cargar driver de Chrome
+        self.data_access = data_access
+        self.current_folder = os.path.join(self.working_folder,'Info Bancaria', f'{self.today.year}-{self.today.month:02d}')
+        self.closed_folder = os.path.join(self.working_folder,'Info Bancaria', 'Meses cerrados', 'Repositorio por mes')
+        self.temporal_downloads = os.path.join(self.working_folder, 'Info Bancaria', 'Descargas temporales')
         
-    
     def chrome_driver_load(self, directory):
         """Launch Chrome with OS-specific paths and consistent configuration."""
 
@@ -122,34 +125,29 @@ class WebAutomation:
 
         return None
     
-    def execute_download_session(self, download_folder, archivos_faltantes, periodo):
-        """Ejecuta una sesión completa de descarga"""
-        if any('cerrado' in archivo for archivo in archivos_faltantes):
-            print(self.helper.message_print("MES CERRADO: Débito: meses anteriores al mes actual. \nCrédito: Al último corte, dos cortes atrás. \nEn ningún caso es después del corte o del 1 de este mes al día de hoy."))
-        print(f"Path del directorio de descargas en execute_download_session: {os.path.join(*download_folder.split(os.sep)[-2:])}")
+    def execute_download_session(self, final_files):
+        print("Iniciando sesión de descarga web...")
+        print(final_files)
         try:
-            # Inicializar driver
-            self.driver = self.chrome_driver_load(download_folder)
+            self.driver = self.chrome_driver_load(self.temporal_downloads)
             if not self.driver:
                 print("❌ No se pudo iniciar ChromeDriver. Revisa los mensajes anteriores.")
                 return False
 
-            # Configurar acciones según los datos de acceso
             actions = self._build_actions(self.data_access)
-
-            # Ejecutar navegación
             success = self._execute_navigation(actions)
-            if success:
-                print("✅ Navegación completada con éxito. Procediendo a procesar archivos...")
 
-                # Ejecutar file_routing después de la navegación
-                result = self.file_routing(download_folder, archivos_faltantes, periodo)
-                if result:
-                    print("✅ Descarga y organización de archivos completada con éxito.")
-                    return True
-                else:
-                    print("❌ No se pudieron procesar los archivos.")
-                    return False
+            if success:
+                print("✅ Navegación completada con éxito. Procediendo a la descarga manual guiada...")
+                
+                # 🧭 Iniciar guía manual fuera del flujo de navegación
+                self.rename_downloads_guided(final_files)
+
+                print("🏁 Todas las descargas y renombrados completados correctamente.")
+            else:
+                print("❌ No se pudieron procesar las acciones de login.")
+                return False
+
         except Exception as e:
             print(f"❌ Error durante la automatización: {e}")
             return False
@@ -158,7 +156,6 @@ class WebAutomation:
             if self.driver:
                 input(Helper.message_print("Presiona enter para cerrar el navegador"))
                 self.driver.quit()
-
                 
     def file_routing(self, download_folder, archivos_faltantes, periodo):
         print(f"Buscando archivos en el directorio: {download_folder}")
@@ -297,40 +294,34 @@ class WebAutomation:
         actions = {
             "https://www.banorte.com/wps/portal/ixe/Home/inicio": [
                 {
-                    "type": "send_keys", 
-                    "by": By.XPATH, 
+                    "type": "send_keys",
+                    "by": By.XPATH,
                     "locator": '//*[@id="userid"]',
                     "value": data_access.get("BANORTE_user", "")
                 },
                 {
-                    "type": "click", 
-                    "by": By.XPATH, 
+                    "type": "click",
+                    "by": By.XPATH,
                     "locator": '//*[@id="btn_lgn_entrar"]'
                 },
                 {
-                    "type": "send_keys", 
-                    "by": By.XPATH, 
+                    "type": "send_keys",
+                    "by": By.XPATH,
                     "locator": '//*[@id="passwordLogin"]',
                     "value": data_access.get("BANORTE_password", "")
                 },
                 {
-                    "type": "wait_user", 
+                    "type": "wait_user",
                     "value": "Por favor ingresa tu token y presiona enter en la terminal"
                 },
                 {
-                    "type": "click", 
-                    "by": By.XPATH, 
+                    "type": "click",
+                    "by": By.XPATH,
                     "locator": '//*[@id="btnAceptarloginPasswordAsync"]'
-                },
-                #{
-                #    "type": "call_function",  # Nueva acción personalizada
-                #    "function": self.file_routing,  # Referencia a la función
-                #    "args": [self.working_folder, data_access.get("archivos_faltantes", []), data_access.get("periodo", "")]
-                #}
+                }
             ]
         }
-        return actions
-    
+        return actions    
     def _execute_navigation(self, actions):
         """Ejecuta la navegación web paso a paso"""
         for url, steps in actions.items():
@@ -414,3 +405,81 @@ class WebAutomation:
         except Exception as e:
             print(f"    ❌ Error en paso {step_number}: {e}")
             return False
+
+    def rename_downloads_guided(self, final_files):
+        """Guía al usuario para descargar y renombrar archivos"""
+        import time, glob
+        print("\n🧹 Limpiando carpeta temporal...")
+        for f in glob.glob(os.path.join(self.temporal_downloads, "*.csv")):
+            try:
+                os.remove(f)
+            except Exception:
+                pass
+
+        # Agrupar por cuenta
+        grouped = {}
+        for item in final_files:
+            grouped.setdefault(item["account"], []).append(item)
+
+        for account, items in grouped.items():
+            print(f"\n⚙️ Procesando cuenta {account}")
+            input(f"➡️ Navega a la sección de la cuenta {account} y presiona Enter para continuar...")
+
+            for item in items:
+                status = item.get("status")
+                period = item.get("period")
+                print(f"\n⬇️ Descarga el archivo ({status.upper()} - {period}) y presiona Enter cuando termine...")
+                before = set(glob.glob(os.path.join(self.temporal_downloads, "*.csv")))
+                input()
+                detected = None
+                for _ in range(30):
+                    time.sleep(1)
+                    after = set(glob.glob(os.path.join(self.temporal_downloads, "*.csv")))
+                    new_files = after - before
+                    if new_files:
+                        detected = list(new_files)[0]
+                        break
+                if not detected:
+                    print("⚠️ No se detectó ningún archivo nuevo.")
+                    continue
+                base = os.path.basename(detected)
+                ext = os.path.splitext(base)[1]
+                if status == "closed":
+                    new_name = f"{period} {account}_{base}"
+                else:
+                    new_name = f"{account}_{base}"
+                try:
+                    os.rename(detected, os.path.join(self.temporal_downloads, new_name))
+                    print(f"✅ Archivo renombrado: {new_name}")
+                except Exception as e:
+                    print(f"⚠️ No se pudo renombrar el archivo {base}: {e}")
+
+        print("🏁 Descargas completadas y renombradas.")
+        return True
+
+
+if __name__ == "__main__":
+    # 1️⃣ Obtiene la ruta absoluta al archivo .env (un nivel arriba del archivo actual)
+    env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.env'))
+    dot_env_name = "MAIN_PATH"
+
+    # 2️⃣ Carga variables del .env si existe
+    if os.path.exists(env_path):
+        load_dotenv(dotenv_path=env_path)
+        # 3️⃣ Obtiene la variable MAIN_PATH
+        working_folder = os.getenv(dot_env_name)
+        if not working_folder:
+            raise ValueError(f"La variable {dot_env_name} no está definida en {env_path}")
+        # 4️⃣ Construye la ruta absoluta hacia config.yaml dentro del MAIN_PATH
+        yaml_path = os.path.join(working_folder, 'config.yaml')
+        if not os.path.exists(yaml_path):
+            raise FileNotFoundError(f"No se encontró config.yaml en {yaml_path}")
+        # 5️⃣ Carga el archivo YAML
+        with open(yaml_path, 'r') as file:
+            data_access = yaml.safe_load(file)
+        # 6️⃣ Ejecuta la aplicación principal
+        app = DownloaderWorkflow(working_folder, data_access)
+        app.download_missing_files()
+
+    else:
+        raise FileNotFoundError(f"No se encontró el archivo .env en {env_path}")

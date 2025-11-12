@@ -1,12 +1,13 @@
 from .sheets_updater import SheetsUpdater
 from Library.csv_to_sql import CSV_TO_SQL
-
+from Library.downloader_workflow import DownloaderWorkflow
 
 class BankingManager:
     def __init__(self, working_folder, data_access):
         self.working_folder = working_folder
         self.data_access = data_access
         self.csv_to_sql = CSV_TO_SQL(self.working_folder, self.data_access)
+        self.downloader_workflow = DownloaderWorkflow(self.working_folder, self.data_access)
 
     def run_banking_menu(self):
         print("Bienvenido al menú bancario")
@@ -21,7 +22,7 @@ class BankingManager:
 
             if choice == "1":
                 # Call the downloader workflow
-                self.descargador.descargador_workflow()
+                self.downloader_workflow.download_missing_files()
 
             elif choice == "2":
                 print("\nCargar a SQL\n")

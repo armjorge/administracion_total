@@ -1,113 +1,194 @@
-from .web_automation import WebAutomation
 import pandas as pd
 import os
+from datetime import date, datetime
+import yaml
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from dateutil.relativedelta import relativedelta
+try:
+    from Library.web_automation import WebAutomation
+except ModuleNotFoundError:
+    # fallback if running inside the Library folder
+    from web_automation import WebAutomation
+from urllib.parse import urlparse
+import psycopg2
+from colorama import Fore, Style, init
+
 
 class DownloaderWorkflow:
-    def __init__(self, working_folder, data_access, folder_root, path_tc_closed,corriente_temporal_downloads, fechas_corte, today, pickle_debito_cerrado, pickle_credito_cerrado):
+    def __init__(self, working_folder, data_access):
+        self.today = date.today()
         self.working_folder = working_folder
         self.data_access = data_access
-        self.today = today
         self.current_folder = os.path.join(self.working_folder,'Info Bancaria', f'{self.today.year}-{self.today.month:02d}')
         self.closed_folder = os.path.join(self.working_folder,'Info Bancaria', 'Meses cerrados', 'Repositorio por mes')
-        self.web_automation = WebAutomation(self.data_access, self.today, self.closed_folder, self.working_folder)
-    
-    def descargador_workflow(self):
-        print("Bienvenido al menú bancario")
-        # Archivos esperados débito
-        today_period = str(pd.to_datetime(self.today).to_period('M'))  # Convertir a string
-        previous_period = str((pd.to_datetime(self.today).to_period('M') - 1))  # 1 mes atrás
-        two_previous_period = str((pd.to_datetime(self.today).to_period('M') - 2))  # 2 meses atrás
+        self.temporal_downloads = os.path.join(self.working_folder, 'Info Bancaria', 'Descargas temporales')
+        self.web_automation = WebAutomation(self.working_folder, self.data_access)
 
-        expected_files = {
-            today_period: ['credito_corriente', 'credito_cerrado', 'debito_corriente'],
-            previous_period: ['credito_cerrado', 'debito_cerrado'],
-            two_previous_period: ['debito_cerrado']
-        }        # Retirar credito cerrado de today_period si tenemos la fecha de corte
-        expected_files =  self.gestor_de_credito_al_mes(expected_files)
+    def download_missing_files(self):
+        # Get current cutoff_days 
+        connexion = self.sql_conexion(self.data_access['sql_workflow']).connect()
+        if connexion is None:
+            print("❌ No se pudo establecer conexión con SQL Server.")
+            return False
+        # 2️⃣ Intentar leer tabla de cuentas
+        try:
+            actualiza = "SELECT banorte_load.refresh_account_cutoffs();"
+            cutofss = "SELECT * FROM banorte_load.account_cutoffs"
 
-        expected_files = self.confirmar_si_existen(expected_files)
-        for key, value in expected_files.items():
-            print(f"Periodo: {key}, Archivos esperados: {value}")
-        expected_files = {key: value for key, value in expected_files.items() if value}
-        self.download_missing_files(expected_files)
-    
-    def download_missing_files(self, files_to_download):
-        print(f"download_missing_files Directorio de descargas para archivos cerrados: {self.folder_al_corte_descargas_cerradas}")
-        print("Función download_missing_files: le pasa la lista de archivos que se requieren")
-        print("Parámetro files_to_download:")
-        print(files_to_download)
-        for periodo, tipo_archivos in files_to_download.items():
-            print(f"\nProcesando archivos faltantes para el periodo {periodo}...")
+            # Periodos cerrados
+            period_debit = "SELECT DISTINCT period, cuenta FROM banorte_load.debito_cerrado;"
+            period_credit = "SELECT DISTINCT period, cuenta FROM banorte_load.credito_cerrado;"
+            self.df_account_cutoffs = pd.read_sql(cutofss, connexion)
+            self.periods_debit = pd.read_sql(period_debit, connexion)
+            self.periods_credit = pd.read_sql(period_credit, connexion)
 
-            # Si hay archivos cerrados en la lista
-            if 'credito_cerrado' in tipo_archivos or 'debito_cerrado' in tipo_archivos:
-                print(f"Archivos cerrados detectados en el periodo {periodo}: {tipo_archivos}")
+            self.df_account_cutoffs.sort_values(['account_number', 'type', 'cutoff_period'], ascending=[True, True, False], inplace=True)
+            top_two = (
+                self.df_account_cutoffs
+                .groupby(['account_number', 'type'])
+                .head(2)
+                .reset_index(drop=True)
+            )
 
-                # 1. Eliminar los archivos que terminen con '_corriente' de la lista
-                tipo_archivos = [archivo for archivo in tipo_archivos if not archivo.endswith('_corriente')]
-                print(f"Lista después de eliminar archivos '_corriente': {tipo_archivos}")
+            # 4️⃣ Construir lista de tuplas (period, account) para available_files
+            #    Si vienen en dataframes separados (periods_debit y periods_credit)
+            # convertir a tuplas directamente
+            available_debit = list(self.periods_debit.apply(lambda x: (str(x['period']), str(x['cuenta'])), axis=1))
+            available_credit = list(self.periods_credit.apply(lambda x: (str(x['period']), str(x['cuenta'])), axis=1))
+            available_files = set(available_debit + available_credit)
+            # 5️⃣ Detectar cuáles de los top_two no están en available_files
+            closed_needed = []
+            for _, row in top_two.iterrows():
+                pair = (row['cutoff_period'], row['account_number'])
+                if pair not in available_files:
+                    closed_needed.append({
+                        'type': row['type'],
+                        'period': row['cutoff_period'],
+                        'account': row['account_number'],
+                        'status': 'closed'
+                    })
 
-                # 2. Detectar cuál de los dos (credito_cerrado o debito_cerrado) está presente
-                archivos_faltantes_cerrado = []
-                if 'credito_cerrado' in tipo_archivos:
-                    archivos_faltantes_cerrado.append('credito_cerrado')
-                if 'debito_cerrado' in tipo_archivos:
-                    archivos_faltantes_cerrado.append('debito_cerrado')
+            # Procesar tablas abiertas
+            date_debit = "SELECT cuenta, MAX(file_date) AS max_date FROM banorte_load.debito_abierto GROUP BY cuenta;"
+            date_credit = "SELECT cuenta, MAX(file_date) AS max_date FROM banorte_load.credito_abierto GROUP BY cuenta;"
+            df_open_debit = pd.read_sql(date_debit, connexion)
+            df_open_credit = pd.read_sql(date_credit, connexion) 
+            print(df_open_debit.head())
+            print(df_open_credit.head())           
+            # Convertir max_date a tipo datetime
+            df_open_debit['max_date'] = pd.to_datetime(df_open_debit['max_date'])
+            df_open_credit['max_date'] = pd.to_datetime(df_open_credit['max_date'])     
+            # Filtrar filas donde max_date pertenece al mes actual
+            # Filtrar filas donde max_date pertenece al mes actual
+            # Filtrar filas donde max_date != fecha de hoy (archivos que no se han actualizado hoy)
 
-                print(f"Archivos faltantes cerrados para el periodo {periodo}: {archivos_faltantes_cerrado}")
+            # Construir lista needed_open
+            needed_open = []
+            current_period = f"{self.today.year}-{self.today.month:02d}"
+            next_period_date = self.today + relativedelta(months=1)
+            next_period = f"{next_period_date.year}-{next_period_date.month:02d}"    
+            today = pd.Timestamp(self.today)
 
-                # 3. Si la lista tiene elementos, ejecutar la descarga
-                if archivos_faltantes_cerrado:
-                    print(f"Ejecutando descarga para archivos cerrados: {archivos_faltantes_cerrado}")
-                    self.web_automation.execute_download_session(
-                        self.folder_al_corte_descargas_cerradas, archivos_faltantes_cerrado, periodo
-                    )
+            # Solo agregar si la fecha máxima NO es hoy
+            filtered_debit = df_open_debit[df_open_debit['max_date'].dt.date != today.date()]
+            filtered_credit = df_open_credit[df_open_credit['max_date'].dt.date != today.date()]
 
-            elif 'credito_corriente' in tipo_archivos or 'debito_corriente' in tipo_archivos:
-                # Remover 'credito_corriente' si no está mencionado
-                if not 'credito_corriente' in tipo_archivos:
-                    print("Removiendo 'credito_corriente'..., no es necesario")
-                    # Aquí puedes agregar la lógica para verificar si 'credito_corriente' debe ser eliminado
-                    tipo_archivos.remove('credito_corriente')  # Remover si es necesario
+            for _, row in filtered_debit.iterrows():
+                needed_open.append({
+                    'type': 'debit',
+                    'period': current_period,
+                    'account': str(row['cuenta']),
+                    'status': 'open'
+                })
 
-                # Remover 'debito_corriente' si no está mencionado
-                if not 'debito_corriente' in tipo_archivos:
-                    print("Removiendo 'debito_corriente'..., no es necesario")
-                    # Aquí puedes agregar la lógica para verificar si 'debito_corriente' debe ser eliminado
-                    tipo_archivos.remove('debito_corriente')  # Remover si es necesario
-                archivos_faltantes_corriente = tipo_archivos  # Actualizar la lista de archivos faltantes
-                print(f"Archivos faltantes Mes corriente a descargar: {archivos_faltantes_corriente}")
-                print(f"Vamos a descargar {archivos_faltantes_corriente} del mes {periodo}")
-                
-                if archivos_faltantes_corriente: 
-                    self.web_automation.execute_download_session(self.corriente_temporal_downloads, archivos_faltantes_corriente, periodo)
+            for _, row in filtered_credit.iterrows():
+                needed_open.append({
+                    'type': 'credit',
+                    'period': next_period,
+                    'account': str(row['cuenta']),
+                    'status': 'open'
+                })
 
-    def check_expected_file(self, list_expected_suffix, input_dataframe):
-        final_files = []
-        sum_columns = ['Cargo', 'Cargos']  # Columns to check for sums
+            # Combinar con closed_needed
+            final_files = closed_needed + needed_open
+            if final_files:
+                for file in final_files:
+                    print(f"⬇️ Necesita descargar: {file['status']} - {file['account']} - {file['period']}")                             
+                self.web_automation.execute_download_session(final_files)
+            # Agregar: envíar query de actualización de cutoffs
+            # Que esta función se corra si cron_query no está actualizado o de alguna manera si no existe registro de cuándo corrimos la función. 
+            self.execute_cron_query()
+            connexion.commit()
+            connexion.close()
+            print("Todos los archivos están actualizados, buen trabajo 👍")
+            print("✅ Proceso de descarga completado.")
 
-        for item in list_expected_suffix:
-            # Filter rows where 'file_name' starts with the given prefix (e.g., '2025-09')
-            filtered_rows = input_dataframe[input_dataframe['file_name'].str.startswith(item, na=False)]
+        except Exception as e:
+            error_msg = str(e)
 
-            if not filtered_rows.empty:
-                # If rows are found, check if sum_columns exist and print their sums
-                print(f"✅ Archivos encontrados para el patrón '{item}': {len(filtered_rows)} filas.")
-                for col in sum_columns:
-                    if col in filtered_rows.columns:
-                        column_sum = filtered_rows[col].sum()
-                        print(f"   - Suma de la columna '{col}': {column_sum}")
-                    else:
-                        continue
-            else:
-                # If no rows are found, add the prefix to final_files
-                print(f"⚠️ No se encontraron archivos para el patrón '{item}'.")
-                final_files.append(item)
+    def execute_cron_query(self):
+        print("\t🔄 Ejecutando actualización de cutoffs en la base de datos...")
+        stmt = 'SELECT banorte_load.refresh_account_cutoffs();'
+        db_url = self.data_access["sql_workflow"]
+        parsed = urlparse(db_url)
+        conn_params = {
+            "dbname": parsed.path.lstrip("/"),
+            "user": parsed.username,
+            "password": parsed.password,
+            "host": parsed.hostname,
+            "port": parsed.port or 5432,
+        }
 
-        # Return the list of prefixes for which no matching rows were found
-        if final_files:
-            print(f"❌ Archivos faltantes para los patrones: {final_files}")
-            return final_files  
-        else:
-            print("✅ Todos los archivos esperados están presentes.")
+        # Conexión directa psycopg2
+        try:
+            raw_conn = psycopg2.connect(**conn_params)
+            raw_conn.autocommit = True
+            cur = raw_conn.cursor()
+            print(f"{Fore.GREEN}✅ Direct PostgreSQL connection established.{Style.RESET_ALL}")
+        except Exception as e:
+            print(f"❌ Error creating raw PostgreSQL connection: {e}")
+            return False
+        try:
+            cur.execute(stmt)
+            print(f"{Fore.GREEN}✅ Cutoffs updated successfully.{Style.RESET_ALL}")
+        except Exception as e:
+            print(f"{Fore.RED}❌ Error executing statement: {e}{Style.RESET_ALL}")
+
+
+    def sql_conexion(self, sql_url):
+        try:
+            engine = create_engine(sql_url)
+            return engine
+        except Exception as e:
+            print(f"❌ Error connecting to database: {e}")
             return None
+
+        
+
+
+if __name__ == "__main__":
+    # 1️⃣ Obtiene la ruta absoluta al archivo .env (un nivel arriba del archivo actual)
+    env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.env'))
+    dot_env_name = "MAIN_PATH"
+
+    # 2️⃣ Carga variables del .env si existe
+    if os.path.exists(env_path):
+        load_dotenv(dotenv_path=env_path)
+        # 3️⃣ Obtiene la variable MAIN_PATH
+        working_folder = os.getenv(dot_env_name)
+        if not working_folder:
+            raise ValueError(f"La variable {dot_env_name} no está definida en {env_path}")
+        # 4️⃣ Construye la ruta absoluta hacia config.yaml dentro del MAIN_PATH
+        yaml_path = os.path.join(working_folder, 'config.yaml')
+        if not os.path.exists(yaml_path):
+            raise FileNotFoundError(f"No se encontró config.yaml en {yaml_path}")
+        # 5️⃣ Carga el archivo YAML
+        with open(yaml_path, 'r') as file:
+            data_access = yaml.safe_load(file)
+        # 6️⃣ Ejecuta la aplicación principal
+        app = DownloaderWorkflow(working_folder, data_access)
+        app.download_missing_files()
+
+    else:
+        raise FileNotFoundError(f"No se encontró el archivo .env en {env_path}")
