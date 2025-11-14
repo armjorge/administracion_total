@@ -86,8 +86,10 @@ class CSV_TO_SQL:
         # CURRENT DATAFRAMES
         # Generate current dataframes to upload
         df_debit_current = self.get_dataframes_to_upload(self.current_folder, 'BANORTE_debit_headers',  {'debit': 'abierto'})
-        df_credit_current = self.get_dataframes_to_upload(self.current_folder, 'BANORTE_credit_headers',  {'credit': 'abierto'})
-        
+        df_credit_current = self.get_dataframes_to_upload(self.current_folder, 'BANORTE_credit_headers',  {'credit':'abierto'}) 
+        print("DataFrames 'Current' to upload summary:")
+        print(df_credit_current.groupby('cuenta').size())
+        print(df_debit_current.groupby('cuenta').size())
        # Save uploaded to excel         
         excel_output = os.path.join(os.path.expanduser("~"), "Downloads", "Banorte_SQL_upload_Data.xlsx")
         with pd.ExcelWriter(excel_output) as writer:
@@ -110,7 +112,7 @@ class CSV_TO_SQL:
         # Upload closed dataframes to SQL
         self.upsert_dataframe(connexion, df_debit_closed, "banorte_load", "debito_cerrado", primary_keys)
         self.upsert_dataframe(connexion, df_credit_closed, "banorte_load", "credito_cerrado", primary_keys)
-        self.upsert_dataframe(connexion, df_credit_current, "banorte_load", "debito_abierto", primary_keys, overwrite_all = True)
+        self.upsert_dataframe(connexion, df_debit_current, "banorte_load", "debito_abierto", primary_keys, overwrite_all = True)
         self.upsert_dataframe(connexion, df_credit_current, "banorte_load", "credito_abierto", primary_keys, overwrite_all = True)
         # Commit and close the connection
         connexion.commit()
@@ -133,7 +135,9 @@ class CSV_TO_SQL:
         if list(estado.values())[0] == 'cerrado':
             csv_files = glob.glob(os.path.join(folder, '*.csv'))
         elif list(estado.values())[0] == 'abierto':
+            #(f"Archivos CSV encontrados: {[f for f in glob.glob(os.path.join(folder, '*.csv'))]}")
             csv_files = [f for f in glob.glob(os.path.join(folder, '*.csv')) if self.get_file_date(f) == self.today]
+            print(f"Archivos CSV encontrados para estado abierto: {[os.path.basename(i) for i in csv_files]}")
         else:
             csv_files = []
 
@@ -273,7 +277,7 @@ class CSV_TO_SQL:
         cur = raw_conn.cursor()
         try:
             if overwrite_all:
-                cur.execute(f"TRUNCATE TABLE {schema}.{table_name}")
+                cur.execute(f"TRUNCATE TABLE {schema}.{table_name} RESTART IDENTITY CASCADE;")
             values_iter = (
                 tuple(sanitize_value(val, col) for val, col in zip(row, cols))
                 for row in df.itertuples(index=False, name=None)

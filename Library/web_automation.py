@@ -127,7 +127,7 @@ class WebAutomation:
     
     def execute_download_session(self, final_files):
         print("Iniciando sesión de descarga web...")
-        print(final_files)
+        #print(final_files)
         try:
             self.driver = self.chrome_driver_load(self.temporal_downloads)
             if not self.driver:
@@ -139,7 +139,6 @@ class WebAutomation:
 
             if success:
                 print("✅ Navegación completada con éxito. Procediendo a la descarga manual guiada...")
-                
                 # 🧭 Iniciar guía manual fuera del flujo de navegación
                 self.rename_downloads_guided(final_files)
 
@@ -154,140 +153,9 @@ class WebAutomation:
 
         finally:
             if self.driver:
-                input(Helper.message_print("Presiona enter para cerrar el navegador"))
+                input("Presiona enter para cerrar el navegador")
                 self.driver.quit()
                 
-    def file_routing(self, download_folder, archivos_faltantes, periodo):
-        print(f"Buscando archivos en el directorio: {download_folder}")
-
-        """Gestiona la ruta de los archivos descargados"""
-        expected_headers_credito = self.data_access['BANORTE_credit_headers']
-        expected_headers_debito = self.data_access['BANORTE_debit_headers']
-
-        # Determinar los headers descargados según los patrones en archivos_faltantes
-        headers_descargados = []
-        if 'credito_corriente' in archivos_faltantes or 'credito_cerrado' in archivos_faltantes:
-            headers_descargados.append(expected_headers_credito)
-        if 'debito_corriente' in archivos_faltantes or 'debito_cerrado' in archivos_faltantes:
-            headers_descargados.append(expected_headers_debito)
-
-        # Imprimir los headers seleccionados
-        print("\nHeaders seleccionados dinámicamente:")
-        for header in headers_descargados:
-            print(f" - {header}")
-
-        paths_destino = {}
-        print("Archivos faltantes", archivos_faltantes, "\n")
-
-        # Generar rutas dinámicas para los archivos faltantes
-        if 'debito_corriente' in archivos_faltantes:
-            suffix = '_debito.csv'
-            partial_path = self.helper.archivo_corriente_reciente(self.today, suffix, 'corriente')
-            paths_destino['debito_corriente'] = partial_path
-        if 'credito_corriente' in archivos_faltantes:
-            suffix = '_credito.csv'
-            partial_path = self.helper.archivo_corriente_reciente(self.today, suffix, 'corriente')
-            paths_destino['credito_corriente'] = partial_path
-        if 'debito_cerrado' in archivos_faltantes:
-            suffix = '_debito.csv'
-            partial_path = self.helper.archivo_corriente_reciente(periodo, suffix, 'cerrado')
-            paths_destino['debito_cerrado'] = partial_path
-        if 'credito_cerrado' in archivos_faltantes:
-            suffix = '_credito.csv'
-            partial_path = self.helper.archivo_corriente_reciente(periodo, suffix, 'cerrado')
-            paths_destino['credito_cerrado'] = partial_path
-
-        # Loop para reintentar hasta que los archivos sean encontrados
-        max_retries = 5
-        retries = 0
-        while retries < max_retries:
-            print(f"🔄 Intento {retries + 1} de {max_retries} para encontrar archivos...")
-            csv_files = self.helper.get_files_in_directory(download_folder)  # Asegúrate de usar download_folder aquí
-            print(f"Archivos encontrados: {csv_files}")
-
-            # Filtrar archivos por headers
-            csv_files_credit = [f for f in csv_files if self.helper.get_file_headers(os.path.join(download_folder, f)) == expected_headers_credito]
-            csv_files_debito = [f for f in csv_files if self.helper.get_file_headers(os.path.join(download_folder, f)) == expected_headers_debito]
-
-            print(f"Archivos de crédito encontrados: {csv_files_credit}")
-            print(f"Archivos de débito encontrados: {csv_files_debito}")
-
-            if csv_files_credit or csv_files_debito:
-                break  # Salir del loop si se encuentran archivos
-            else:
-                print("⚠️ No se encontraron archivos válidos. Esperando antes de reintentar...")
-                retries += 1
-                import time
-                input("\nPresiona Enter para continuar buscar de nuevo...\n")
-
-        if retries == max_retries:
-            print("❌ No se encontraron archivos después de varios intentos.")
-            return False
-
-        # Procesar archivos encontrados
-        for key, path in paths_destino.items():
-            if key == 'debito_corriente' and csv_files_debito:
-                print(f"🔄 Fusionando archivos de débito para {key}...")
-                merged_file = self.helper.merge_files([os.path.join(download_folder, f) for f in csv_files_debito])
-                if merged_file:
-                    destination_path = os.path.join(self.working_folder, path)
-                    self.helper.move_file(merged_file, destination_path)
-                    print(f"✅ Archivo fusionado de débito movido a: {destination_path}")
-                    for file in csv_files_debito:
-                        file_path = os.path.join(download_folder, file)
-                        if os.path.exists(file_path):  # Verificar si el archivo aún existe
-                            os.remove(file_path)
-                            print(f"🗑️ Archivo eliminado: {file}")
-                        else:
-                            print(f"⚠️ Archivo ya no existe y no se puede eliminar: {file}")
-
-            elif key == 'credito_corriente' and csv_files_credit:
-                print(f"🔄 Fusionando archivos de crédito para {key}...")
-                merged_file = self.helper.merge_files([os.path.join(download_folder, f) for f in csv_files_credit])
-                if merged_file:
-                    destination_path = os.path.join(self.working_folder, path)
-                    self.helper.move_file(merged_file, destination_path)
-                    print(f"✅ Archivo fusionado de crédito movido a: {destination_path}")
-                    for file in csv_files_credit:
-                        file_path = os.path.join(download_folder, file)
-                        if os.path.exists(file_path):  # Verificar si el archivo aún existe
-                            os.remove(file_path)
-                            print(f"🗑️ Archivo eliminado: {file}")
-                        else:
-                            print(f"⚠️ Archivo ya no existe y no se puede eliminar: {file}")
-            elif key == 'debito_cerrado' and csv_files_debito:
-                print(f"🔄 Fusionando archivos de débito para {key}...")
-                merged_file = self.helper.merge_files([os.path.join(download_folder, f) for f in csv_files_debito])
-                if merged_file:
-                    destination_path = os.path.join(self.path_tc_closed, "Repositorio por mes")
-                    self.helper.create_directory_if_not_exists(destination_path)
-                    destination_file_path = os.path.join(destination_path, path)
-                    self.helper.move_file(merged_file, destination_file_path)
-                    print(f"✅ Archivo fusionado de débito movido a: {destination_file_path}")
-                    for file in csv_files_debito:
-                        file_path = os.path.join(download_folder, file)
-                        if os.path.exists(file_path):  # Verificar si el archivo aún existe
-                            os.remove(file_path)
-                            print(f"🗑️ Archivo eliminado: {file}")
-                        else:
-                            print(f"⚠️ Archivo ya no existe y no se puede eliminar: {file}")
-            elif key == 'credito_cerrado' and csv_files_credit:
-                print(f"🔄 Fusionando archivos de crédito para {key}...")
-                merged_file = self.helper.merge_files([os.path.join(download_folder, f) for f in csv_files_credit])
-                if merged_file:
-                    destination_path = os.path.join(self.path_tc_closed, "Repositorio por mes")
-                    self.helper.create_directory_if_not_exists(destination_path)
-                    destination_file_path = os.path.join(destination_path, path)
-                    self.helper.move_file(merged_file, destination_file_path)
-                    print(f"✅ Archivo fusionado de crédito movido a: {destination_file_path}")
-                    for file in csv_files_credit:
-                        file_path = os.path.join(download_folder, file)
-                        if os.path.exists(file_path):  # Verificar si el archivo aún existe
-                            os.remove(file_path)
-                            print(f"🗑️ Archivo eliminado: {file}")
-                        else:
-                            print(f"⚠️ Archivo ya no existe y no se puede eliminar: {file}")
-        return True
 
     def _build_actions(self, data_access):
         """Construye las acciones con las credenciales del usuario"""
@@ -407,57 +275,77 @@ class WebAutomation:
             return False
 
     def rename_downloads_guided(self, final_files):
-        """Guía al usuario para descargar y renombrar archivos"""
-        import time, glob
+        import time, glob, os
+
         print("\n🧹 Limpiando carpeta temporal...")
+        # Limpieza inicial (solo una vez)
         for f in glob.glob(os.path.join(self.temporal_downloads, "*.csv")):
             try:
                 os.remove(f)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"⚠️ No se pudo borrar {f}: {e}")
 
-        # Agrupar por cuenta
+        # Agrupar por tipo: debit / credit
         grouped = {}
         for item in final_files:
-            grouped.setdefault(item["account"], []).append(item)
+            grouped.setdefault(item["type"], []).append(item)
 
-        for account, items in grouped.items():
-            print(f"\n⚙️ Procesando cuenta {account}")
-            input(f"➡️ Navega a la sección de la cuenta {account} y presiona Enter para continuar...")
+        for ttype, items in grouped.items():
+            print(f"\n📂 Procesando tipo: {ttype.upper()}")
+            input(f"➡️ Navega a la sección de {ttype.upper()} en Banorte y presiona Enter...")
 
             for item in items:
-                status = item.get("status")
-                period = item.get("period")
-                print(f"\n⬇️ Descarga el archivo ({status.upper()} - {period}) y presiona Enter cuando termine...")
-                before = set(glob.glob(os.path.join(self.temporal_downloads, "*.csv")))
-                input()
+
+                account = item["account"]
+                period  = item["period"]
+                status  = item["status"]
+
+                print(f"\n⬇️ Descarga para cuenta {account} ({status.upper()} • {period})")
+                print("   👉 Cuando YA descargaste el archivo, presiona Enter…")
+                
+
+
+                input()  # usuario descarga
+
+                # Esperar a que aparezca el csv
                 detected = None
-                for _ in range(30):
+                for _ in range(60):  # 60 segundos
                     time.sleep(1)
-                    after = set(glob.glob(os.path.join(self.temporal_downloads, "*.csv")))
-                    new_files = after - before
-                    if new_files:
-                        detected = list(new_files)[0]
+                    files = glob.glob(os.path.join(self.temporal_downloads, "*.csv"))
+                    if files:
+                        detected = files[0]
                         break
+
                 if not detected:
-                    print("⚠️ No se detectó ningún archivo nuevo.")
+                    print("⚠️ No se detectó archivo descargado. Continuando con el siguiente…")
                     continue
+
                 base = os.path.basename(detected)
-                ext = os.path.splitext(base)[1]
+                ext  = os.path.splitext(base)[1]
+
+                # Nombre final
                 if status == "closed":
-                    new_name = f"{period} {account}_{base}"
+                    new_name = f"{period} {account}{ext}"
                 else:
                     new_name = f"{account}_{base}"
+
+                new_path = os.path.join(self.temporal_downloads, new_name)
+
+                # Evitar sobrescritura
+                counter = 1
+                while os.path.exists(new_path):
+                    new_name = f"{account}_{counter}{ext}"
+                    new_path = os.path.join(self.temporal_downloads, new_name)
+                    counter += 1
+
                 try:
-                    os.rename(detected, os.path.join(self.temporal_downloads, new_name))
-                    print(f"✅ Archivo renombrado: {new_name}")
+                    os.rename(detected, new_path)
+                    print(f"✅ Archivo guardado como: {new_name}")
                 except Exception as e:
-                    print(f"⚠️ No se pudo renombrar el archivo {base}: {e}")
+                    print(f"⚠️ No se pudo renombrar {base}: {e}")
 
-        print("🏁 Descargas completadas y renombradas.")
+        print("\n🏁 Todos los archivos descargados y renombrados correctamente.")
         return True
-
-
 if __name__ == "__main__":
     # 1️⃣ Obtiene la ruta absoluta al archivo .env (un nivel arriba del archivo actual)
     env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.env'))

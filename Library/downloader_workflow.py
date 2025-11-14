@@ -5,6 +5,9 @@ import yaml
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from dateutil.relativedelta import relativedelta
+import os, glob
+
+
 try:
     from Library.web_automation import WebAutomation
 except ModuleNotFoundError:
@@ -24,6 +27,7 @@ class DownloaderWorkflow:
         self.closed_folder = os.path.join(self.working_folder,'Info Bancaria', 'Meses cerrados', 'Repositorio por mes')
         self.temporal_downloads = os.path.join(self.working_folder, 'Info Bancaria', 'Descargas temporales')
         self.web_automation = WebAutomation(self.working_folder, self.data_access)
+        print("Arhivos CSV", glob.glob(os.path.join(self.temporal_downloads, "*.csv")))
 
     def download_missing_files(self):
         # Get current cutoff_days 
@@ -69,19 +73,6 @@ class DownloaderWorkflow:
                         'status': 'closed'
                     })
 
-            # Procesar tablas abiertas
-            date_debit = "SELECT cuenta, MAX(file_date) AS max_date FROM banorte_load.debito_abierto GROUP BY cuenta;"
-            date_credit = "SELECT cuenta, MAX(file_date) AS max_date FROM banorte_load.credito_abierto GROUP BY cuenta;"
-            df_open_debit = pd.read_sql(date_debit, connexion)
-            df_open_credit = pd.read_sql(date_credit, connexion) 
-            print(df_open_debit.head())
-            print(df_open_credit.head())           
-            # Convertir max_date a tipo datetime
-            df_open_debit['max_date'] = pd.to_datetime(df_open_debit['max_date'])
-            df_open_credit['max_date'] = pd.to_datetime(df_open_credit['max_date'])     
-            # Filtrar filas donde max_date pertenece al mes actual
-            # Filtrar filas donde max_date pertenece al mes actual
-            # Filtrar filas donde max_date != fecha de hoy (archivos que no se han actualizado hoy)
 
             # Construir lista needed_open
             needed_open = []
@@ -89,29 +80,68 @@ class DownloaderWorkflow:
             next_period_date = self.today + relativedelta(months=1)
             next_period = f"{next_period_date.year}-{next_period_date.month:02d}"    
             today = pd.Timestamp(self.today)
+            # dataframe cuentas
+            accounts_query = "SELECT * FROM banorte_load.accounts"
+            df_accounts = pd.read_sql(accounts_query, connexion)
+            print(df_accounts.head())
 
-            # Solo agregar si la fecha máxima NO es hoy
-            filtered_debit = df_open_debit[df_open_debit['max_date'].dt.date != today.date()]
-            filtered_credit = df_open_credit[df_open_credit['max_date'].dt.date != today.date()]
+            debit_accounts = df_accounts[df_accounts['type'] == 'debit']['account_number'].astype(str).tolist()
+            credit_accounts = df_accounts[df_accounts['type'] == 'credit']['account_number'].astype(str).tolist()
 
-            for _, row in filtered_debit.iterrows():
+            needed_open = []
+
+            for item in debit_accounts:
                 needed_open.append({
                     'type': 'debit',
-                    'period': current_period,
-                    'account': str(row['cuenta']),
+                    'period': today.date().strftime('%Y-%m-%d'),
+                    'account': str(item),
                     'status': 'open'
                 })
 
-            for _, row in filtered_credit.iterrows():
+            for item in credit_accounts:
                 needed_open.append({
                     'type': 'credit',
-                    'period': next_period,
+                    'period': today.date().strftime('%Y-%m-%d'),
+                    'account': str(item),
+                    'status': 'open'
+                })
+
+            # Procesar tablas abiertas
+            query_debit = "SELECT cuenta, MAX(file_date) AS max_date FROM banorte_load.debito_abierto GROUP BY cuenta;"
+            query_credit = "SELECT cuenta, MAX(file_date) AS max_date FROM banorte_load.credito_abierto GROUP BY cuenta;"
+
+            df_open_debit = pd.read_sql(query_debit, connexion)
+            df_open_credit = pd.read_sql(query_credit, connexion)
+
+            # ⚠️ Corregido: debe ser lista, no dict
+            files_and_dates = []
+
+            for _, row in df_open_debit.iterrows():
+                files_and_dates.append({
+                    'type': 'debit',
+                    'period': row['max_date'].strftime('%Y-%m-%d'),
                     'account': str(row['cuenta']),
                     'status': 'open'
                 })
 
-            # Combinar con closed_needed
-            final_files = closed_needed + needed_open
+            for _, row in df_open_credit.iterrows():
+                files_and_dates.append({
+                    'type': 'credit',
+                    'period': row['max_date'].strftime('%Y-%m-%d'),
+                    'account': str(row['cuenta']),
+                    'status': 'open'
+                })
+            print(f"Archivos teóricos: {needed_open}")
+            print(f"Archivos presentes en el servidor: {files_and_dates}")
+            needed_open = [
+                entry for entry in needed_open
+                if entry not in files_and_dates
+            ]
+
+            print("Registro retirado:", needed_open)
+            # Combinar
+            final_files = closed_needed + needed_open            
+            
             if final_files:
                 for file in final_files:
                     print(f"⬇️ Necesita descargar: {file['status']} - {file['account']} - {file['period']}")                             
