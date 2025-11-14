@@ -52,47 +52,90 @@ class CONCEPT_FILING:
         # ========== CLASIFICADOR DE CONCEPTOS ==========
         if vista == "Clasificador de conceptos":
             st.title("🏦 Clasificador de Conceptos Banorte")
-            tipo = st.sidebar.radio("Seleccionar tipo de movimientos:", ["Débito", "Crédito"])
 
+            tipo = st.sidebar.radio("Seleccionar tipo de movimientos:", ["Débito", "Crédito"])
             table_name = "debito_conceptos" if tipo == "Débito" else "credito_conceptos"
 
-            # 4) Fetch data (usar columnas reales y llaves existentes)
+            # =====================================================
+            # 1) Cargar datos principales
+            # =====================================================
             try:
                 query = f"""
                 SELECT fecha, unique_concept, concepto, cuenta, estado,
-                       cargo, abono, category_group, category_subgroup, beneficiario
+                    cargo, abono, category_group, category_subgroup, beneficiario
                 FROM "{schema}"."{table_name}"
                 ORDER BY fecha DESC
-                LIMIT 100;
+                LIMIT 1000;
                 """
-                df = pd.read_sql(query, conn)
-            except Exception:
-                df = pd.DataFrame()
+                df_raw = pd.read_sql(query, conn)
+            except:
+                st.error("No se pudo cargar la tabla.")
+                return
 
+            if df_raw.empty:
+                st.info("No hay registros disponibles.")
+                return
+
+            # =====================================================
+            # 2) Cargar catálogos
+            # =====================================================
             try:
                 df_cat = pd.read_sql(f'SELECT DISTINCT "group", subgroup FROM "{schema}".category;', conn)
-            except Exception:
+            except:
                 df_cat = pd.DataFrame(columns=["group", "subgroup"])
 
             try:
                 df_benef = pd.read_sql(f'SELECT nombre FROM "{schema}".beneficiaries;', conn)
-            except Exception:
+            except:
                 df_benef = pd.DataFrame(columns=["nombre"])
 
-            # 6) UI principal
-            st.markdown("### Registros disponibles")
+            # =====================================================
+            # 3) FILTROS dinamicos
+            # =====================================================
+            st.sidebar.markdown("### Filtrar datos")
+
+            # --- Filtro estado ---
+            estados = ["Todos"] + sorted(df_raw["estado"].dropna().unique().tolist())
+            estado_sel = st.sidebar.selectbox("Estado del movimiento", estados)
+
+            # --- Filtro cuenta ---
+            cuentas = ["Todas"] + sorted(df_raw["cuenta"].dropna().unique().tolist())
+            cuenta_sel = st.sidebar.selectbox("Cuenta", cuentas)
+
+            # --- Aplicar filtros ---
+            df = df_raw.copy()
+
+            if estado_sel != "Todos":
+                df = df[df["estado"] == estado_sel]
+
+            if cuenta_sel != "Todas":
+                df = df[df["cuenta"] == cuenta_sel]
+
+            # =====================================================
+            # 4) Mostrar tabla filtrada
+            # =====================================================
+            st.markdown("### Registros filtrados")
             if df.empty:
-                st.info("No hay registros disponibles para mostrar.")
+                st.warning("No hay registros con esos filtros.")
                 return
-            else:
-                st.dataframe(df, use_container_width=True, height=400)
+
+            # 🔥 La línea que corrige el problema:
+            df = df.reset_index(drop=True)
+
+            st.dataframe(df, use_container_width=True, height=400)
 
             st.markdown("---")
             st.markdown("### ✏️ Actualizar clasificación")
 
+            # =====================================================
+            # 5) Selección de índice basado en la TABLA FILTRADA
+            # =====================================================
             selected_index = st.number_input(
                 "Selecciona el índice de fila a editar",
-                min_value=0, max_value=len(df)-1, value=0, step=1
+                min_value=0,
+                max_value=len(df)-1,
+                value=0,
+                step=1
             )
             selected_row = df.iloc[selected_index]
 
@@ -108,25 +151,32 @@ class CONCEPT_FILING:
                 unsafe_allow_html=True
             )
 
+            # =====================================================
+            # 6) Selectboxes del catálogo
+            # =====================================================
             grupos = sorted(df_cat['group'].dropna().unique().tolist())
             current_group = selected_row.get("category_group", None)
-            group = st.selectbox("Grupo", options=grupos,
-                                 index=grupos.index(current_group) if current_group in grupos else 0)
+            group_idx = grupos.index(current_group) if current_group in grupos else 0
+
+            group = st.selectbox("Grupo", options=grupos, index=group_idx)
 
             subgrupos_filtrados = sorted(
                 df_cat[df_cat['group'] == group]['subgroup'].dropna().unique().tolist()
             )
             current_subgroup = selected_row.get("category_subgroup", None)
-            subgroup = st.selectbox("Subgrupo", options=subgrupos_filtrados,
-                                    index=subgrupos_filtrados.index(current_subgroup)
-                                    if current_subgroup in subgrupos_filtrados else 0)
+            subgroup_idx = subgrupos_filtrados.index(current_subgroup) if current_subgroup in subgrupos_filtrados else 0
+
+            subgroup = st.selectbox("Subgrupo", options=subgrupos_filtrados, index=subgroup_idx)
 
             beneficiarios = [''] + sorted(df_benef['nombre'].dropna().unique().tolist())
             current_benef = selected_row.get("beneficiario", "")
-            benef = st.selectbox("Beneficiario", options=beneficiarios,
-                                 index=beneficiarios.index(current_benef)
-                                 if current_benef in beneficiarios else 0)
+            benef_idx = beneficiarios.index(current_benef) if current_benef in beneficiarios else 0
 
+            benef = st.selectbox("Beneficiario", options=beneficiarios, index=benef_idx)
+
+            # =====================================================
+            # 7) Guardar cambios
+            # =====================================================
             if st.button("💾 Guardar cambios"):
                 if not group or not subgroup:
                     st.warning("⚠️ Debes seleccionar un grupo y un subgrupo.")
