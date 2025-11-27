@@ -17,6 +17,7 @@ class BankingManager:
             choice = input(f"""'¿Qué deseas hacer?'
         1. Descargar
         2. Cargar a SQL, GoogleSheet
+        3. Exportar SQL a Excel local   
         0. Salir
         Elige una opción: """).strip()
 
@@ -34,7 +35,9 @@ class BankingManager:
                     self.data_access,
                 )                
                 self.sheets_updater.update_multiple_sheets(dict_dataframes)
-
+            elif choice == "3":
+                print("\nExportar SQL a Excel local\n")
+                self.csv_to_sql.sql_to_excel_export()
 
             elif choice == "0":
             

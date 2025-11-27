@@ -185,7 +185,6 @@ class DownloaderWorkflow:
         except Exception as e:
             print(f"{Fore.RED}❌ Error executing statement: {e}{Style.RESET_ALL}")
 
-
     def sql_conexion(self, sql_url):
         try:
             engine = create_engine(sql_url)

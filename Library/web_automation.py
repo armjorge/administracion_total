@@ -12,6 +12,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from datetime import date
+import time, glob
+import shutil
 
 try:
     from Library.helpers import Helper
@@ -127,7 +129,7 @@ class WebAutomation:
     
     def execute_download_session(self, final_files):
         print("Iniciando sesión de descarga web...")
-        #print(final_files)
+        print(final_files)
         try:
             self.driver = self.chrome_driver_load(self.temporal_downloads)
             if not self.driver:
@@ -275,10 +277,8 @@ class WebAutomation:
             return False
 
     def rename_downloads_guided(self, final_files):
-        import time, glob, os
-
         print("\n🧹 Limpiando carpeta temporal...")
-        # Limpieza inicial (solo una vez)
+        # Limpieza inicial (solo una vez al inicio)
         for f in glob.glob(os.path.join(self.temporal_downloads, "*.csv")):
             try:
                 os.remove(f)
@@ -295,57 +295,91 @@ class WebAutomation:
             input(f"➡️ Navega a la sección de {ttype.upper()} en Banorte y presiona Enter...")
 
             for item in items:
-
                 account = item["account"]
                 period  = item["period"]
-                status  = item["status"]
+                status  = item["status"]  # 'open' o 'closed'
 
                 print(f"\n⬇️ Descarga para cuenta {account} ({status.upper()} • {period})")
                 print("   👉 Cuando YA descargaste el archivo, presiona Enter…")
-                
 
+                # 1) Tomamos un snapshot de los CSV que ya existen ANTES de descargar
+                existing_files = set(glob.glob(os.path.join(self.temporal_downloads, "*.csv")))
 
-                input()  # usuario descarga
+                input()  # el usuario descarga aquí
 
-                # Esperar a que aparezca el csv
+                # 2) Esperar a que aparezca UN archivo nuevo
                 detected = None
-                for _ in range(60):  # 60 segundos
+                for _ in range(60):  # hasta 60 segundos
                     time.sleep(1)
-                    files = glob.glob(os.path.join(self.temporal_downloads, "*.csv"))
-                    if files:
-                        detected = files[0]
+                    current_files = set(glob.glob(os.path.join(self.temporal_downloads, "*.csv")))
+                    new_files = current_files - existing_files  # solo los nuevos
+
+                    if new_files:
+                        # Si por alguna razón hubiera más de uno, tomamos el más reciente
+                        detected = max(new_files, key=os.path.getmtime)
                         break
 
                 if not detected:
-                    print("⚠️ No se detectó archivo descargado. Continuando con el siguiente…")
+                    print("⚠️ No se detectó archivo descargado nuevo. Continuando con el siguiente…")
                     continue
 
                 base = os.path.basename(detected)
                 ext  = os.path.splitext(base)[1]
 
-                # Nombre final
+                # 3) Nombre final en la carpeta temporal
                 if status == "closed":
                     new_name = f"{period} {account}{ext}"
-                else:
+                else:  # 'open' u otro
                     new_name = f"{account}_{base}"
 
                 new_path = os.path.join(self.temporal_downloads, new_name)
 
-                # Evitar sobrescritura
+                # Evitar sobrescritura en carpeta temporal
                 counter = 1
                 while os.path.exists(new_path):
-                    new_name = f"{account}_{counter}{ext}"
+                    name_noext, _ = os.path.splitext(new_name)
+                    new_name = f"{name_noext}_{counter}{ext}"
                     new_path = os.path.join(self.temporal_downloads, new_name)
                     counter += 1
 
                 try:
                     os.rename(detected, new_path)
-                    print(f"✅ Archivo guardado como: {new_name}")
+                    print(f"✅ Archivo renombrado como: {new_name}")
                 except Exception as e:
                     print(f"⚠️ No se pudo renombrar {base}: {e}")
+                    continue
 
-        print("\n🏁 Todos los archivos descargados y renombrados correctamente.")
+                # 4) Mover según status (open / closed)
+                if status == "open":
+                    target_root = self.current_folder   # asegúrate de definir esto en __init__
+                else:  # 'closed'
+                    target_root = self.closed_folder    # idem
+
+                os.makedirs(target_root, exist_ok=True)
+
+                target_path = os.path.join(target_root, new_name)
+
+                # Evitar sobrescritura en la carpeta destino también
+                move_counter = 1
+                final_target = target_path
+                name_noext, ext2 = os.path.splitext(new_name)
+                while os.path.exists(final_target):
+                    final_target = os.path.join(
+                        target_root,
+                        f"{name_noext}_{move_counter}{ext2}"
+                    )
+                    move_counter += 1
+
+                try:
+                    shutil.move(new_path, final_target)
+                    print(f"📁 Movido a: {final_target}")
+                except Exception as e:
+                    print(f"⚠️ No se pudo mover {new_path} a {final_target}: {e}")
+
+        print("\n🏁 Todos los archivos descargados, renombrados y movidos correctamente.")
         return True
+
+
 if __name__ == "__main__":
     # 1️⃣ Obtiene la ruta absoluta al archivo .env (un nivel arriba del archivo actual)
     env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.env'))

@@ -369,6 +369,85 @@ class CSV_TO_SQL:
             print(f"⚠️ Error obteniendo fecha de creación de {file}: {e}")
             return pd.NaT
 
+    def sql_to_excel_export(self):
+        print("Exportando datos con conceptos del servidor SQL a Excel local...")
+
+        connexion = self.sql_conexion(self.data_access['sql_workflow']).connect()
+        if connexion is None:
+            print("❌ No se pudo establecer conexión con SQL Server.")
+            return False
+
+        debit_query = """
+            WITH debito AS (
+                SELECT 
+                    fecha, concepto, cargo, abono, saldo, file_date, file_name,
+                    estado, cuenta, unique_concept, period
+                FROM banorte_load.debito_cerrado
+
+                UNION ALL
+
+                SELECT 
+                    fecha, concepto, cargo, abono, saldo, file_date, file_name,
+                    estado, cuenta, unique_concept, period
+                FROM banorte_load.debito_abierto
+            )
+            SELECT 
+                d.*,
+                c.category_group,
+                c.category_subgroup,
+                c.beneficiario
+            FROM debito d
+            LEFT JOIN banorte_load.debito_conceptos c
+                ON  d.fecha = c.fecha
+                AND d.cargo = c.cargo
+                AND d.abono = c.abono
+                AND d.unique_concept = c.unique_concept
+            ORDER BY d.fecha DESC;
+        """
+
+        df_debit = pd.read_sql(debit_query, connexion)
+        query_credit = """
+                    WITH credito AS (
+                        SELECT 
+                            fecha, concepto, cargo, abono, saldo, file_date, file_name,
+                            estado, cuenta, unique_concept, period
+                        FROM banorte_load.credito_cerrado
+
+                        UNION ALL
+
+                        SELECT 
+                            fecha, concepto, cargo, abono, saldo, file_date, file_name,
+                            estado, cuenta, unique_concept, period
+                        FROM banorte_load.credito_abierto
+                    )
+                    SELECT 
+                        credito.*,
+                        credito_conceptos.category_group,
+                        credito_conceptos.category_subgroup,
+                        credito_conceptos.beneficiario
+                    FROM credito
+                    LEFT JOIN banorte_load.credito_conceptos AS credito_conceptos
+                        ON  credito.fecha = credito_conceptos.fecha
+                        AND credito.cargo = credito_conceptos.cargo
+                        AND credito.abono = credito_conceptos.abono
+                        AND credito.unique_concept = credito_conceptos.unique_concept
+                    ORDER BY credito.fecha DESC;        
+            """
+        df_credit = pd.read_sql(query_credit, connexion)
+
+        print(df_credit.head())
+        # Ruta final del archivo
+        home = os.path.expanduser("~")
+        output_path = os.path.join(home, "Downloads", "SQL_bank_data.xlsx")
+
+        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+            df_credit.to_excel(writer, sheet_name="df_credit", index=False)
+            df_debit.to_excel(writer, sheet_name="df_debit", index=False)
+
+        print(f"Archivo guardado correctamente en: {output_path}")
+
+
+        return df_debit
     def __init__(self, working_folder, data_access):
         self.today = date.today()
         self.working_folder = working_folder

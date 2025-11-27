@@ -31,7 +31,6 @@ class TotalManagementApp:
             elif choice == "4":
                 MONGO_DB_PROCESS(self.working_folder, self.data_access).csv_to_sql_process()
 
-
             elif choice == "0":
                 print("👋 ¡Hasta luego!")
                 break
