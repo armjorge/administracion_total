@@ -244,10 +244,17 @@ class CSV_TO_SQL:
                 DO UPDATE SET {update_clause}
             """
         elif overwrite_all == True:
-            insert_sql = f"""
-                INSERT INTO {schema}.{table_name} ({col_list_sql})
-                VALUES %s
-            """
+            with conn.connection.cursor() as cur:
+                if overwrite_all:
+                    # 1) Vacía la tabla "abierta"
+                    # Si tienes FKs y te da error, cambia a DELETE FROM
+                    cur.execute(f"TRUNCATE TABLE {schema}.{table_name}")
+                    
+                    # 2) Inserta todo de nuevo
+                    insert_sql = f"""
+                        INSERT INTO {schema}.{table_name} ({col_list_sql})
+                        VALUES %s
+                    """
         date_like_cols = {col for col in cols if 'fecha' in col or 'date' in col}
         dummy_date = datetime(1900, 1, 1)
 
