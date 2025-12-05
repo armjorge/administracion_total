@@ -1,70 +1,8 @@
-# Dependencias del proyecto administracion_total - Sistema de Inteligencia Bancaria
-# Instalación: pip install -r requirements.txt
+streamlit>=1.50.0
+python-dotenv
+pandas
+colorama 
+PyYAML
+pymongo
 
-# === PROCESAMIENTO DE DATOS ===
-pandas>=1.5.0
-numpy>=1.21.0
-xlsxwriter>=3.0.0          # Exportación avanzada a Excel
-tabulate>=0.9.0            # Formateo de tablas para reportes
 
-# === BASE DE DATOS ===
-psycopg2-binary>=2.9.0     # PostgreSQL connector
-SQLAlchemy>=1.4.0          # ORM y connection pooling
-alembic>=1.8.0             # Database migrations (opcional)
-
-# === AUTOMATIZACIÓN WEB Y DESCARGA ===
-selenium>=4.15.0
-webdriver-manager>=4.0.0   # Gestión automática de drivers
-beautifulsoup4>=4.11.0     # HTML parsing alternativo
-lxml>=4.9.0                # XML/HTML parser rápido
-
-# === ARCHIVOS EXCEL Y CSV ===
-openpyxl>=3.1.0            # Leer/escribir Excel (.xlsx)
-xlrd>=2.0.0                # Leer Excel antiguos (.xls)
-chardet>=5.0.0             # Detección de encoding en CSVs
-
-# === GOOGLE SHEETS (INTEGRACIÓN) ===
-gspread>=5.0.0
-gspread-dataframe>=3.3.0
-google-auth>=2.0.0         # Autenticación Google más moderna
-google-auth-oauthlib>=0.5.0
-google-auth-httplib2>=0.1.0
-
-# === CONFIGURACIÓN Y SECRETOS ===
-PyYAML>=6.0
-python-dotenv>=0.19.0      # Variables de entorno .env
-cryptography>=3.4.0       # Encriptación de passwords
-
-# === NETWORKING Y API ===
-requests>=2.28.0
-urllib3>=1.26.0
-httpx>=0.24.0              # HTTP client moderno (alternativa a requests)
-
-# === LOGGING Y MONITOREO ===
-colorama>=0.4.4            # Colores en terminal
-tqdm>=4.64.0               # Progress bars
-rich>=12.0.0               # Terminal formatting avanzado
-
-# === FECHA Y TIEMPO ===
-python-dateutil>=2.8.0    # Parsing avanzado de fechas
-pytz>=2022.1               # Timezones
-
-# === ANÁLISIS Y REPORTES ===
-matplotlib>=3.5.0          # Gráficos básicos
-seaborn>=0.11.0            # Visualización estadística
-plotly>=5.10.0             # Gráficos interactivos
-jinja2>=3.1.0              # Templates para reportes HTML
-
-# === DESARROLLO Y TESTING ===
-pytest>=7.0.0              # Testing framework
-black>=22.0.0              # Code formatter
-flake8>=4.0.0              # Linting
-mypy>=0.950                # Type checking
-
-# === PERFORMANCE ===
-joblib>=1.1.0              # Paralelización de tareas
-multiprocessing-logging>=0.3.0  # Logging en procesos paralelos
-
-# Librerías built-in de Python (no requieren instalación):
-# os, sys, datetime, glob, collections, subprocess, pickle, re, json, csv, 
-# logging, threading, concurrent.futures, pathlib, shutil, zipfile
