@@ -5,3 +5,4 @@ colorama
 PyYAML
 pymongo
 sqlalchemy
+psycopg2-binary
