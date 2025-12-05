@@ -12,7 +12,7 @@ class TotalManagementApp:
         """Run the main application menu."""
         while True:
             choice = input(
-                "Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n\t3) Conceptos \n\t4) Recuperar estados de cuenta\n\t0) para salir\n"
+                "Elige: \n\t1) para la información bancaria  o \n\t2) para el módulo de gastos y presupuestos\n\t3) Conceptos \n\t4) Cargar estados de cuenta descargados\n\t0) para salir\n"
             ).strip()
             if choice == "1":
                 print("\n🚀 Iniciando la ƒgeneración de información bancaria para su posterior minería...")                     
@@ -29,7 +29,7 @@ class TotalManagementApp:
                     print(f"❌ Error al ejecutar Streamlit: {e}")
 
             elif choice == "4":
-                MONGO_DB_PROCESS(self.working_folder, self.data_access).csv_to_sql_process()
+                MONGO_DB_PROCESS(self.working_folder, self.data_access).pdf_to_mongo_orchestrator()
 
             elif choice == "0":
                 print("👋 ¡Hasta luego!")
