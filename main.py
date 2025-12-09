@@ -6,7 +6,7 @@ import sys
 import colorama
 from Library.initialize import INITIALIZE 
 from Library.mongo_db_process import MONGO_DB_PROCESS
-
+from dotenv import load_dotenv
 class TotalManagementApp:
     def run(self):
         """Run the main application menu."""
@@ -38,13 +38,27 @@ class TotalManagementApp:
                 print("\n⚠️ Elige una opción válida (1, 2, o 0). Inténtalo de nuevo.\n")
 
     def __init__(self):
+        # Carpeta donde está este archivo .py
         self.root_folder = os.path.dirname(os.path.abspath(__file__))
-        self.working_folder = INITIALIZE().initialize(self.root_folder)
+
+        # Ruta del .env en esa misma carpeta
+        env_file = os.path.join(self.root_folder, ".env")
+
+        # Cargar variables del .env al entorno
+        load_dotenv(dotenv_path=env_file, override=True)
+
+        # Leer MAIN_PATH del entorno
+        # Si no existe, usamos root_folder como fallback
+        self.working_folder = os.getenv("MAIN_PATH", self.root_folder)
+
         print(f"Working folder set to: {self.working_folder}")
         # Load config.yaml (same as csv_to_sql.py)
+        
         yaml_path = os.path.join(self.working_folder, 'config.yaml')
         with open(yaml_path, 'r') as file:
             self.data_access = yaml.safe_load(file)
+                  
+        self.data_access['working_folder'] = self.working_folder
         self.banking_manager = BankingManager(self.working_folder, self.data_access)
 
 if __name__ == "__main__":
