@@ -47,3 +47,11 @@ mapping_credito_banorte:
   cuenta: cuenta
   unique_concept: unique_concept
   period: period
+
+url_google_sheet: 'https://docs.google.com/spreadsheets/gsheets_id'
+BANORTE_url: 'https://www.banorte.com/wps/portal/ixe/Home/inicio'
+BANORTE_user: 'bankuser'
+BANORTE_password: 'bankpassword'
+
+MONGO_URI: 'mongodb+srv://user:pass@server/'
+sql_workflow: "postgresql://user:pass@server/db"

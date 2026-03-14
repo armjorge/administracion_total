@@ -1,8 +1,0 @@
-streamlit>=1.50.0
-python-dotenv
-pandas
-colorama 
-PyYAML
-pymongo
-sqlalchemy
-psycopg2-binary

@@ -10,3 +10,4 @@ __pycache__/
 .qodo/
 .vscode/
 .env
+.venv/
