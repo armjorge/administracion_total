@@ -14,7 +14,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 from datetime import date
 import time, glob
 import shutil
-
+import sys
+import select
+import tty
+import termios
 try:
     from Library.helpers import Helper
 except ModuleNotFoundError:
@@ -140,23 +143,21 @@ class WebAutomation:
             success = self._execute_navigation(actions)
 
             if success:
-                print("✅ Navegación completada con éxito. Procediendo a la descarga manual guiada...")
-                # 🧭 Iniciar guía manual fuera del flujo de navegación
+                # 2. If login worked (or you did it manually), we enter the core logic
+                print("✅ Acceso listo. Iniciando el proceso de descarga...")
                 self.rename_downloads_guided(final_files)
-
-                print("🏁 Todas las descargas y renombrados completados correctamente.")
             else:
-                print("❌ No se pudieron procesar las acciones de login.")
-                return False
+                print("❌ El acceso falló.")
 
         except Exception as e:
-            print(f"❌ Error durante la automatización: {e}")
-            return False
+            print(f"❌ Error General: {e}")
 
         finally:
+            # 3. ONLY close when everything is done
             if self.driver:
-                input("Presiona enter para cerrar el navegador")
+                input("\n🏁 Todo listo. Presiona ENTER para cerrar el navegador...")
                 self.driver.quit()
+
                 
 
     def _build_actions(self, data_access):
@@ -192,26 +193,85 @@ class WebAutomation:
             ]
         }
         return actions    
+    def _wait_for_manual_interrupt(self, timeout=3):
+            """Espera cualquier tecla por 'timeout' segundos en macOS/Linux."""
+            fd = sys.stdin.fileno()
+            # Guardamos la configuración actual de la terminal
+            old_settings = termios.tcgetattr(fd)
+            try:
+                # tty.setcbreak permite capturar la tecla sin esperar al ENTER
+                tty.setcbreak(fd)
+                print(f"Presiona CUALQUIER TECLA para modo MANUAL ({timeout}s): ", end="", flush=True)
+                
+                start_time = time.time()
+                while time.time() - start_time < timeout:
+                    # Revisa si hay algo en el buffer de entrada (stdin)
+                    if select.select([sys.stdin], [], [], 0.1)[0]:
+                        sys.stdin.read(1) # 'Limpiamos' la tecla presionada del buffer
+                        return True
+                    
+                    # Opcional: imprimir puntos para ver progreso
+                    # print(".", end="", flush=True)
+                    
+            except Exception as e:
+                print(f"⚠️ Error en detector de teclado: {e}")
+            finally:
+                # IMPORTANTE: Devolvemos la terminal a su estado original
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                
+            return False
+
     def _execute_navigation(self, actions):
-        """Ejecuta la navegación web paso a paso"""
+        """
+        Challenge solved: If manual mode is triggered, it opens the URL, 
+        waits for you, and returns True so the main script immediately 
+        calls rename_downloads_guided.
+        """
         for url, steps in actions.items():
-            print(f"\n🔗 Navegando a {url}")
+            # Check for ANY KEY to go manual
+            if self._wait_for_manual_interrupt(timeout=3):
+                print("\n\n🛠 [MODO MANUAL ACTIVADO]")
+                self.driver.get(url) 
+                print("👉 Navega/Logueate manualmente en el navegador.")
+                input("🚀 Una vez estés en la pantalla de inicio, presiona ENTER aquí para ir a las descargas...")
+                
+                # This is the key: we return True immediately. 
+                # The calling function will then trigger rename_downloads_guided.
+                return True 
+
+            # --- Flujo Automático (Si no presionas nada) ---
+            print(f"\n🔗 Navegando automáticamente a {url}")
             self.driver.get(url)
             try:
                 for idx, step in enumerate(steps, start=1):
-                    success = self._execute_step(step, idx)
-                    if not success:
-                        if step["type"] == "call_function":
-                            print("⚠️ Reintentando la función personalizada...")
-                            continue  # Reintentar la función personalizada
-                        else:
-                            return False
-                            
-            except TimeoutException as e:
-                print(f"❌ Timeout durante la navegación: {e}")
+                    if not self._execute_step(step, idx):
+                        return False
+            except Exception as e:
+                print(f"❌ Error: {e}")
                 return False
-            
+                
         return True
+
+    # def _execute_navigation(self, actions):
+    #     """Ejecuta la navegación web paso a paso"""
+    #     for url, steps in actions.items():
+    #         print(f"\n🔗 Navegando a {url}")
+    #         self.driver.get(url)
+    #         try:
+    #             for idx, step in enumerate(steps, start=1):
+    #                 success = self._execute_step(step, idx)
+    #                 if not success:
+    #                     if step["type"] == "call_function":
+    #                         print("⚠️ Reintentando la función personalizada...")
+    #                         continue  # Reintentar la función personalizada
+    #                     else:
+    #                         return False
+                            
+    #         except TimeoutException as e:
+    #             print(f"❌ Timeout durante la navegación: {e}")
+    #             return False
+            
+    #     return True
     
     def _execute_step(self, step, step_number):
         """Ejecuta un paso individual de la automatización"""
